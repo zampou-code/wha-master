@@ -400,7 +400,8 @@ git commit -m "feat: chiffrement AES-256-GCM des secrets applicatifs"
 ### Task 3 : Schéma Prisma et base de test
 
 **Files:**
-- Create: `prisma/schema.prisma`, `src/lib/prisma.ts`, `vitest.int.config.ts`, `tests/int-setup.ts`, `tests/helpers/db.ts`
+- Create: `prisma/schema.prisma`, `prisma.config.ts`, `src/lib/prisma.ts`, `vitest.int.config.ts`, `tests/int-setup.ts`, `tests/helpers/db.ts`
+  - Note (ruling R7, 2026-09-17) : Prisma 7 refuse `url` dans le bloc `datasource`. L'URL de migration passe par `prisma.config.ts` (`defineConfig({ datasource: { url: env("DATABASE_URL") } })`). Le client d'exécution continue de la recevoir via l'adaptateur `PrismaPg`.
 - Create: `docker-compose.dev.yml`
 - Test: `tests/db/contact.int.test.ts`
 
@@ -425,7 +426,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum ContactMode {

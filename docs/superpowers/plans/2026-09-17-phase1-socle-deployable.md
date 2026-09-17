@@ -15,7 +15,7 @@
 - **P1 — Activation explicite par contact** : `Contact.mode` vaut `OFF` à la création. Aucun code de cette phase ne le change. L'ingestion qui découvre un contact le crée en `OFF`.
 - **P2 — Fail-closed** : toute anomalie mène à un non-envoi. En phase 1, aucun code d'envoi n'existe ; le principe s'applique aux erreurs de webhook (répondre en erreur plutôt que d'avaler silencieusement).
 - **P5 — Tout est tracé** : chaque message persisté conserve son `waMessageId` d'origine.
-- Node `22.x`, pnpm `9.x`.
+- Node `22.x`, pnpm `11.x` (amendé le 2026-09-17, ruling R5 : la contrainte initiale disait 9.x sans que la spec ne l'exige). `package.json` doit porter `packageManager` et `engines` pour verrouiller les deux.
 - Prisma 7 : générateur `prisma-client` (pas `prisma-client-js`), `output = "../src/generated/prisma"`, import depuis `@/generated/prisma/client`, adaptateur `PrismaPg` obligatoire.
 - Next.js 16 : le fichier de proxy est `src/proxy.ts` et exporte `proxy` (le nom `middleware` est déprécié).
 - GOWA : image `aldinokemal2104/go-whatsapp-web-multidevice`, commande `rest`, port interne `3000`, session dans `/app/storages`.

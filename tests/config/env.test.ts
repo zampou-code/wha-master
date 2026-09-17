@@ -35,3 +35,38 @@ describe("parseEnv", () => {
       .toThrow(/GOWA_BASIC_AUTH/);
   });
 });
+
+function messageDeErreur(executer: () => unknown): string {
+  try {
+    executer();
+  } catch (erreur) {
+    return erreur instanceof Error ? erreur.message : String(erreur);
+  }
+  throw new Error("La fonction n'a pas levé d'erreur comme attendu");
+}
+
+describe("parseEnv - messages en français uniquement", () => {
+  it("rejette un BETTER_AUTH_URL invalide avec un message en français", () => {
+    const message = messageDeErreur(() =>
+      parseEnv({ ...valide, BETTER_AUTH_URL: "pas-une-url" } as NodeJS.ProcessEnv),
+    );
+    expect(message).toMatch(/BETTER_AUTH_URL doit être une URL valide/);
+    expect(message).not.toMatch(/Invalid (input|url|email|string)|expected \w+, received/);
+  });
+
+  it("rejette un ADMIN_EMAIL invalide avec un message en français", () => {
+    const message = messageDeErreur(() =>
+      parseEnv({ ...valide, ADMIN_EMAIL: "pas-un-email" } as NodeJS.ProcessEnv),
+    );
+    expect(message).toMatch(/ADMIN_EMAIL doit être une adresse e-mail valide/);
+    expect(message).not.toMatch(/Invalid (input|url|email|string)|expected \w+, received/);
+  });
+
+  it("rejette un GOWA_BASE_URL invalide avec un message en français", () => {
+    const message = messageDeErreur(() =>
+      parseEnv({ ...valide, GOWA_BASE_URL: "pas-une-url" } as NodeJS.ProcessEnv),
+    );
+    expect(message).toMatch(/GOWA_BASE_URL doit être une URL valide/);
+    expect(message).not.toMatch(/Invalid (input|url|email|string)|expected \w+, received/);
+  });
+});

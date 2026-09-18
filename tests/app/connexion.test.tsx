@@ -16,11 +16,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => routerStub,
 }));
 
-const toDataURL = vi.fn().mockResolvedValue("data:image/png;base64,xxx");
-vi.mock("qrcode", () => ({
-  default: { toDataURL },
-}));
-
 const fetchMock = vi.fn();
 
 function reponseJson(corps: unknown, status = 200): Response {
@@ -33,7 +28,6 @@ function reponseJson(corps: unknown, status = 200): Response {
 describe("page d'appairage WhatsApp (/connexion)", () => {
   beforeEach(() => {
     push.mockReset();
-    toDataURL.mockClear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -55,7 +49,7 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
         return Promise.resolve(reponseJson({ isConnected: true, isLoggedIn: false }));
       }
       if (url.includes("/api/whatsapp/qr")) {
-        return Promise.resolve(reponseJson({ code: "2@abc", durationSec: 30 }));
+        return Promise.resolve(reponseJson({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" }));
       }
       throw new Error(`URL inattendue: ${url}`);
     });
@@ -133,7 +127,7 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
         return Promise.resolve(reponseJson({ isConnected: true, isLoggedIn: false }));
       }
       if (url.includes("/api/whatsapp/qr")) {
-        return Promise.resolve(reponseJson({ code: "2@abc", durationSec: 30 }));
+        return Promise.resolve(reponseJson({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" }));
       }
       throw new Error(`URL inattendue: ${url}`);
     });
@@ -209,7 +203,7 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
       if (url.includes("/api/whatsapp/qr")) {
         if (premierAppelQr) {
           premierAppelQr = false;
-          return Promise.resolve(reponseJson({ code: "2@abc", durationSec: 30 }));
+          return Promise.resolve(reponseJson({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" }));
         }
         return Promise.reject(new TypeError("Failed to fetch"));
       }

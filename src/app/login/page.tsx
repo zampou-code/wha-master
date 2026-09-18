@@ -29,16 +29,42 @@ export default function Connexion() {
   }
 
   return (
-    <main>
-      <h1>Connexion</h1>
-      <form onSubmit={soumettre}>
-        <label htmlFor="email">Adresse e-mail</label>
-        <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <label htmlFor="mdp">Mot de passe</label>
-        <input id="mdp" type="password" value={motDePasse} onChange={(e) => setMotDePasse(e.target.value)} required />
-        {erreur && <p role="alert">{erreur}</p>}
-        <button type="submit" disabled={enCours}>{enCours ? "Connexion…" : "Se connecter"}</button>
-      </form>
+    <main className="ecran">
+      <div className="colonne">
+        <header className="entete">
+          <h1>Connexion</h1>
+          <p>Entre tes identifiants pour accéder au poste de contrôle.</p>
+        </header>
+
+        <form className="formulaire" onSubmit={soumettre}>
+          <div className="champ">
+            <label htmlFor="email">Adresse e-mail</label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div className="champ">
+            <label htmlFor="mdp">Mot de passe</label>
+            <input
+              id="mdp"
+              type="password"
+              value={motDePasse}
+              onChange={(e) => setMotDePasse(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {erreur && <p role="alert" className="alerte">{erreur}</p>}
+          <button type="submit" className="bouton-principal" disabled={enCours}>
+            {enCours ? "Connexion…" : "Se connecter"}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

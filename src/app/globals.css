@@ -1,0 +1,268 @@
+:root {
+  --petrole: #0e1b22;
+  --petrole-clair: #162a33;
+  --brume: #d8dee1;
+  --brume-faible: #8798a0;
+  --sodium: #e8a33d;
+  --braise: #c4533c;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--petrole);
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--petrole);
+  color: var(--brume);
+  font-family: var(--font-bricolage), system-ui, -apple-system, sans-serif;
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+a {
+  color: var(--sodium);
+}
+
+:focus-visible {
+  outline: 3px solid var(--sodium);
+  outline-offset: 3px;
+}
+
+/* Structure commune aux trois pages : colonne unique, gouttière de 16 px
+   minimum, aucune largeur ne dépasse la fenêtre. */
+.ecran {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  padding: 40px 16px;
+}
+
+.colonne {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.entete h1 {
+  font-weight: 800;
+  font-size: 1.6rem;
+  line-height: 1.25;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+}
+
+.entete p {
+  margin: 0;
+  max-width: 36ch;
+  color: var(--brume-faible);
+  font-size: 1rem;
+}
+
+/* Bloc d'état : le rail vertical fin porte l'état par sa couleur. Sodium =
+   en attente, brume-faible = inactif, braise = erreur (jamais décoratif). */
+.bloc-etat {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  padding: 2px 0 2px 20px;
+  border-left: 3px solid var(--brume-faible);
+}
+
+.bloc-etat[data-etat="attente"] {
+  border-left-color: var(--sodium);
+}
+
+.bloc-etat[data-etat="erreur"] {
+  border-left-color: var(--braise);
+}
+
+.bloc-etat__indicateur {
+  position: absolute;
+  left: -6px;
+  top: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--brume-faible);
+}
+
+.bloc-etat[data-etat="attente"] .bloc-etat__indicateur {
+  background: var(--sodium);
+  /* Seule animation de toute l'interface : la pulsation de l'indicateur
+     pendant l'attente d'appairage. */
+  animation: pouls-attente 1.8s ease-in-out infinite;
+}
+
+.bloc-etat[data-etat="erreur"] .bloc-etat__indicateur {
+  background: var(--braise);
+}
+
+@keyframes pouls-attente {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bloc-etat__indicateur {
+    animation: none !important;
+  }
+}
+
+.bloc-etat__texte {
+  min-width: 0;
+}
+
+.bloc-etat__libelle {
+  margin: 0;
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--brume);
+}
+
+.bloc-etat__detail {
+  margin: 6px 0 0;
+  font-size: 0.95rem;
+  color: var(--brume-faible);
+  max-width: 38ch;
+}
+
+.alerte {
+  margin: 0;
+  padding: 12px 16px;
+  border-left: 3px solid var(--braise);
+  background: var(--petrole-clair);
+  color: var(--brume);
+  font-size: 0.95rem;
+  max-width: 42ch;
+}
+
+/* Cadre du QR : généreux, pensé pour être scanné à bout de bras depuis un
+   autre téléphone. */
+.cadre-qr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  padding: 20px;
+  background: var(--petrole-clair);
+}
+
+.cadre-qr__image {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  display: block;
+}
+
+.cadre-qr__message {
+  margin: 0;
+  text-align: center;
+  max-width: 26ch;
+  color: var(--brume-faible);
+}
+
+.etat-relie {
+  margin: 0;
+  max-width: 38ch;
+  color: var(--brume-faible);
+}
+
+button,
+.bouton-principal {
+  font-family: inherit;
+}
+
+.bouton-principal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  border: none;
+  background: var(--sodium);
+  color: var(--petrole);
+  font-weight: 800;
+  font-size: 1rem;
+  min-height: 44px;
+  padding: 12px 22px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.bouton-principal:disabled {
+  background: var(--brume-faible);
+  cursor: not-allowed;
+}
+
+.bouton-secondaire {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  appearance: none;
+  border: 1px solid var(--brume-faible);
+  background: transparent;
+  color: var(--brume);
+  font-weight: 400;
+  font-size: 0.95rem;
+  min-height: 44px;
+  padding: 10px 18px;
+  cursor: pointer;
+}
+
+.lien-discret {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--brume-faible);
+  font-size: 0.95rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Formulaire de connexion : volontairement sans relief, l'attention reste
+   sur le bloc d'état des deux autres pages. */
+.formulaire {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.champ {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.champ label {
+  font-size: 0.85rem;
+  color: var(--brume-faible);
+}
+
+.champ input {
+  background: var(--petrole-clair);
+  border: 1px solid var(--brume-faible);
+  color: var(--brume);
+  font-family: inherit;
+  font-size: 1rem;
+  min-height: 44px;
+  padding: 10px 14px;
+}

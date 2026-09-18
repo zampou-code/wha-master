@@ -28,4 +28,4 @@ RUN export \
   && pnpm build
 
 EXPOSE 3000
-CMD ["sh", "-c", "pnpm prisma migrate deploy && pnpm start"]
+CMD ["sh", "-c", "pnpm prisma migrate deploy && pnpm tsx src/scripts/seed-admin.ts && pnpm start"]

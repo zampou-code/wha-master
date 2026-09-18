@@ -23,8 +23,23 @@ export async function POST(request: Request) {
 
   const analyse = webhookSchema.safeParse(brut);
   if (!analyse.success) {
+    const evenementBrut =
+      typeof brut === "object" && brut !== null && "event" in brut
+        ? (brut as { event?: unknown }).event
+        : undefined;
+
+    if (evenementBrut === "message") {
+      // Un événement "message" qui ne respecte pas le contrat attendu est une
+      // anomalie réelle (P2) : GOWA a changé de format, ou notre schéma est
+      // faux. Le signaler et refuser plutôt que d'avaler silencieusement des
+      // messages — voir docs/deploiement.md section 10.3.
+      console.error("Payload de message invalide", analyse.error.issues);
+      return NextResponse.json({ erreur: "Payload invalide" }, { status: 400 });
+    }
+
     // Les événements non gérés (présence, accusés) sont acquittés sans traitement :
     // répondre en erreur déclencherait cinq tentatives inutiles côté GOWA.
+    console.debug("Événement webhook non géré, acquitté sans traitement", evenementBrut);
     return NextResponse.json({ statut: "ignore" });
   }
 

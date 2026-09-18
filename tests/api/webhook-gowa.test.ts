@@ -78,11 +78,13 @@ describe("POST /api/webhook/gowa", () => {
     expect(ingererMessage).not.toHaveBeenCalled();
   });
 
-  it("signature valide sur un événement non reconnu (ex. presence) : 200, pas d'erreur", async () => {
+  it("signature valide sur un événement non reconnu (ex. presence) : 200, pas d'erreur, journalisé en debug", async () => {
     // Un événement non reconnu doit être acquitté par 200, pas par une erreur :
     // GOWA réessaie un webhook en échec 5 fois avec un backoff exponentiel, et une
     // erreur ici déclencherait cinq tentatives inutiles pour chaque mise à jour de
-    // présence ou accusé de lecture.
+    // présence ou accusé de lecture. Il doit néanmoins être tracé (P5), au niveau
+    // debug pour ne pas polluer les journaux à chaque accusé de lecture.
+    const debugSilencieux = vi.spyOn(console, "debug").mockImplementation(() => {});
     const corps = JSON.stringify({
       event: "presence",
       device_id: "225xxxxx@s.whatsapp.net",
@@ -93,6 +95,37 @@ describe("POST /api/webhook/gowa", () => {
     expect(reponse.status).toBe(200);
     await expect(reponse.json()).resolves.toEqual({ statut: "ignore" });
     expect(ingererMessage).not.toHaveBeenCalled();
+    expect(debugSilencieux).toHaveBeenCalledTimes(1);
+    debugSilencieux.mockRestore();
+  });
+
+  it("événement message qui ne respecte pas le schéma (ex. timestamp numérique) : 400, erreurs Zod journalisées", async () => {
+    // Le contrat suppose `timestamp` en chaîne (docs/deploiement.md section 10.3).
+    // Si GOWA envoie un timestamp numérique ou renomme un champ, ceci ne doit
+    // jamais retomber dans le cas "ignore" silencieux (P2) : c'est un vrai
+    // événement message, juste malformé.
+    const erreurSilencieuse = vi.spyOn(console, "error").mockImplementation(() => {});
+    const corps = JSON.stringify({
+      event: "message",
+      device_id: "225xxxxx@s.whatsapp.net",
+      payload: {
+        id: "3EB0ABC",
+        chat_id: "22500000001@s.whatsapp.net",
+        from: "22500000001@s.whatsapp.net",
+        from_name: "Sarah",
+        body: "coucou",
+        timestamp: 1758139440, // devrait être une chaîne ISO
+        is_from_me: false,
+      },
+    });
+    const { POST } = await import("@/app/api/webhook/gowa/route");
+    const reponse = await POST(requete(corps, signer(corps)));
+    expect(reponse.status).toBe(400);
+    await expect(reponse.json()).resolves.toEqual({ erreur: "Payload invalide" });
+    expect(ingererMessage).not.toHaveBeenCalled();
+    expect(erreurSilencieuse).toHaveBeenCalledTimes(1);
+    expect(erreurSilencieuse.mock.calls[0][0]).toBe("Payload de message invalide");
+    erreurSilencieuse.mockRestore();
   });
 
   it("échec réel de l'ingestion : 500 (P2, GOWA doit réessayer)", async () => {

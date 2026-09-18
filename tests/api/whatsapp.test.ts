@@ -4,14 +4,35 @@ const getSession = vi.fn();
 const getStatus = vi.fn();
 const getLoginQr = vi.fn();
 
-vi.mock("@/lib/auth", () => ({
-  auth: { api: { getSession } },
-  requireSession: async (headers: Headers) => {
-    const session = await getSession({ headers });
-    if (!session) throw new Error("Session absente");
-    return session;
-  },
+// L'environnement est simulé uniquement parce que @/lib/auth (importé réellement
+// ci-dessous) instancie Better Auth et Prisma au chargement du module, ce qui
+// exige un getEnv() valide. Seul auth.api.getSession est simulé : requireSession
+// (src/lib/auth.ts) reste le vrai code, pour que ces tests le couvrent réellement
+// au lieu de le réimplémenter dans un mock.
+vi.mock("@/config/env", () => ({
+  getEnv: () => ({
+    DATABASE_URL: "postgres://wha:test@localhost:5432/test",
+    MASTER_KEY: "a".repeat(64),
+    BETTER_AUTH_SECRET: "b".repeat(32),
+    BETTER_AUTH_URL: "http://localhost:3000",
+    ADMIN_EMAIL: "test@example.com",
+    ADMIN_PASSWORD: "motdepassetest12",
+    GOWA_BASE_URL: "http://localhost:3001",
+    GOWA_BASIC_AUTH: "admin:test",
+    GOWA_WEBHOOK_SECRET: "c".repeat(16),
+    CONTROL_GROUP_JID: undefined,
+  }),
 }));
+
+vi.mock("@/lib/auth", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/auth")>();
+  // Mutation en place, et non un nouvel objet : requireSession() ferme sur la
+  // référence `auth` du module original. Un objet recréé par spread romprait
+  // ce lien et requireSession continuerait d'appeler le vrai getSession.
+  Object.assign(original.auth.api, { getSession });
+  return original;
+});
+
 vi.mock("@/gowa/client", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/gowa/client")>();
   return { ...original, createGowaClient: () => ({ getStatus, getLoginQr }) };

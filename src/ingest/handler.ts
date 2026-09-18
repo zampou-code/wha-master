@@ -104,8 +104,13 @@ export async function ingererMessage(
     if (!estViolationUnicite(erreur)) throw erreur;
     // Livraison concurrente du même message : la course était sur waMessageId,
     // pas une véritable erreur de persistance (P2 reste respecté pour les autres).
+    // Symétrique aux deux compensations ci-dessus : si la relecture ne confirme
+    // pas le doublon (waMessageId n'était pas la contrainte violée — par exemple
+    // Decision.messageId, unique depuis la phase 2), on relance plutôt que
+    // d'avaler l'erreur sous un faux "doublon".
     const messageConcurrent = await prisma.message.findUnique({ where: { waMessageId: payload.id } });
-    return { statut: "doublon", messageId: messageConcurrent?.id };
+    if (!messageConcurrent) throw erreur;
+    return { statut: "doublon", messageId: messageConcurrent.id };
   }
 
   await prisma.thread.update({

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MediaType } from "@/generated/prisma/client";
 
 export const webhookSchema = z.object({
   event: z.string(),
@@ -17,11 +18,19 @@ export const webhookSchema = z.object({
 
 export type WebhookMessage = z.infer<typeof webhookSchema>;
 
-const CLES_MEDIA = ["image", "video", "audio", "document", "sticker", "contact", "location"] as const;
+const CLES_MEDIA: ReadonlyArray<readonly [string, MediaType]> = [
+  ["image", MediaType.IMAGE],
+  ["video", MediaType.VIDEO],
+  ["audio", MediaType.AUDIO],
+  ["document", MediaType.DOCUMENT],
+  ["sticker", MediaType.STICKER],
+  ["contact", MediaType.CONTACT],
+  ["location", MediaType.LOCATION],
+];
 
-export function detecterTypeMedia(payload: Record<string, unknown>): string | null {
-  for (const cle of CLES_MEDIA) {
-    if (payload[cle] !== undefined && payload[cle] !== null) return cle;
+export function detecterTypeMedia(payload: Record<string, unknown>): MediaType | null {
+  for (const [cle, type] of CLES_MEDIA) {
+    if (payload[cle] !== undefined && payload[cle] !== null) return type;
   }
   return null;
 }

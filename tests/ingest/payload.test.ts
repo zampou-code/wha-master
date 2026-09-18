@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { webhookSchema } from "@/ingest/payload";
+import { webhookSchema, detecterTypeMedia } from "@/ingest/payload";
+import { MediaType } from "@/generated/prisma/client";
 
 const evenement = {
   event: "message",
@@ -35,5 +36,21 @@ describe("schéma du webhook GOWA", () => {
   it("rejette un événement sans id de message", () => {
     const sansId = { ...evenement, payload: { ...evenement.payload, id: undefined } };
     expect(webhookSchema.safeParse(sansId).success).toBe(false);
+  });
+});
+
+describe("detecterTypeMedia", () => {
+  it("renvoie la valeur d'énumération correspondante", () => {
+    expect(detecterTypeMedia({ audio: { url: "x" } })).toBe(MediaType.AUDIO);
+    expect(detecterTypeMedia({ image: { url: "x" } })).toBe(MediaType.IMAGE);
+    expect(detecterTypeMedia({ location: { lat: 1 } })).toBe(MediaType.LOCATION);
+  });
+
+  it("renvoie null pour un message purement textuel", () => {
+    expect(detecterTypeMedia({ body: "coucou" })).toBeNull();
+  });
+
+  it("ignore une clé média à null (GOWA sérialise ainsi les absents)", () => {
+    expect(detecterTypeMedia({ audio: null, body: "coucou" })).toBeNull();
   });
 });

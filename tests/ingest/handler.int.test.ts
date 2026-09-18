@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { ingererMessage } from "@/ingest/handler";
 import { resetDb } from "../helpers/db";
+import { MediaType } from "@/generated/prisma/client";
 
 function evenement(surcharge: Record<string, unknown> = {}) {
   return {
@@ -80,7 +81,7 @@ describe("ingestion d'un message", () => {
       {},
     );
     const message = await prisma.message.findUnique({ where: { waMessageId: "MSG-D" } });
-    expect(message?.mediaType).toBe("audio");
+    expect(message?.mediaType).toBe(MediaType.AUDIO);
     expect(message?.text).toBeNull();
   });
 

@@ -56,6 +56,15 @@ describe("ingestion d'un message", () => {
     expect(await prisma.message.count()).toBe(1);
   });
 
+  it("gère une livraison concurrente du même message sans crash ni doublon (rejeu GOWA)", async () => {
+    const [resultatA, resultatB] = await Promise.all([
+      ingererMessage(evenement(), {}),
+      ingererMessage(evenement(), {}),
+    ]);
+    expect([resultatA.statut, resultatB.statut].sort()).toEqual(["doublon", "persiste"]);
+    expect(await prisma.message.count()).toBe(1);
+  });
+
   it("n'ingère pas les messages du groupe de contrôle", async () => {
     const resultat = await ingererMessage(
       evenement({ id: "MSG-C", chat_id: "1234-5678@g.us" }),

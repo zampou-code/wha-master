@@ -42,7 +42,16 @@ export const deviceSchema = z.looseObject({
   id: z.string(),
 });
 
-export const devicesListSchema = enveloppe(z.array(deviceSchema));
+// Piège Go/JSON vérifié en production : une slice nulle se sérialise en `null`,
+// pas en `[]`. GOWA renvoie donc `"results": null` quand aucun appareil n'existe
+// — c'est-à-dire exactement au premier démarrage, le seul moment où cet appel
+// compte. On normalise en liste vide.
+export const devicesListSchema = enveloppe(
+  z
+    .array(deviceSchema)
+    .nullable()
+    .transform((liste) => liste ?? []),
+);
 
 export const deviceCreateSchema = enveloppe(deviceSchema);
 

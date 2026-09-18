@@ -112,6 +112,31 @@ describe("GowaClient", () => {
       expect(idAppareil).toBe("existant");
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
+
+    it("traite results:null comme une liste vide (corps réel observé en production)", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          reponseJson({ code: "SUCCESS", message: "List devices", results: null }),
+        )
+        .mockResolvedValueOnce(
+          reponseJson({
+            status: 200,
+            code: "SUCCESS",
+            message: "Device added",
+            results: {
+              id: "cree",
+              display_name: "",
+              jid: "",
+              state: "disconnected",
+              created_at: "2026-09-18T14:00:00Z",
+            },
+          }),
+        );
+      const idAppareil = await clientAvec(fetchMock as unknown as typeof fetch).ensureDevice();
+      expect(idAppareil).toBe("cree");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("fetchQrImage", () => {

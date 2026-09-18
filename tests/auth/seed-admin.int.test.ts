@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 import { seedAdmin } from "@/scripts/seed-admin";
 
 describe("création du compte unique", () => {
@@ -17,6 +18,31 @@ describe("création du compte unique", () => {
   it("est idempotent : un deuxième appel ne crée pas de doublon", async () => {
     await seedAdmin();
     await seedAdmin();
+    expect(await prisma.user.count()).toBe(1);
+  });
+
+  it("répare un compte incomplet (utilisateur sans compte credential)", async () => {
+    // Simule l'état laissé par un conteneur mort entre les deux écritures :
+    // le user existe, mais createAccount n'a jamais tourné.
+    const ctx = await auth.$context;
+    const email = process.env.ADMIN_EMAIL as string;
+    const utilisateurOrphelin = await ctx.internalAdapter.createUser(
+      { email, name: "Propriétaire", emailVerified: true },
+      { method: "email-password" },
+    );
+
+    expect(await prisma.account.count()).toBe(0);
+
+    await seedAdmin();
+
+    const comptes = await prisma.account.findMany({ where: { userId: utilisateurOrphelin.id } });
+    expect(comptes).toHaveLength(1);
+    expect(comptes[0].providerId).toBe("credential");
+    expect(await prisma.user.count()).toBe(1);
+
+    // Un appel suivant reste un no-op : pas de deuxième compte, pas d'erreur.
+    await seedAdmin();
+    expect(await prisma.account.count()).toBe(1);
     expect(await prisma.user.count()).toBe(1);
   });
 });

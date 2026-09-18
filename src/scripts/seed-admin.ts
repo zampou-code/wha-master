@@ -4,9 +4,29 @@ import { getEnv } from "@/config/env";
 
 export async function seedAdmin(): Promise<void> {
   const env = getEnv();
+  const ctx = await auth.$context;
   const existant = await prisma.user.findUnique({ where: { email: env.ADMIN_EMAIL } });
+
   if (existant) {
-    console.log(`Compte ${env.ADMIN_EMAIL} déjà présent, rien à faire.`);
+    const compteCredential = await ctx.internalAdapter.findCredentialAccount(existant.id);
+    if (compteCredential) {
+      console.log(`Compte ${env.ADMIN_EMAIL} déjà présent, rien à faire.`);
+      return;
+    }
+
+    // L'utilisateur existe mais le compte credential associé n'a jamais été
+    // créé (arrêt du conteneur entre les deux écritures) : on répare plutôt
+    // que de laisser l'opérateur sans moyen de se connecter.
+    const hashReparation = await ctx.password.hash(env.ADMIN_PASSWORD);
+    await ctx.internalAdapter.createAccount({
+      userId: existant.id,
+      providerId: "credential",
+      accountId: existant.id,
+      password: hashReparation,
+    });
+    console.log(
+      `Compte ${env.ADMIN_EMAIL} incomplet (identifiants manquants) : réparé.`,
+    );
     return;
   }
 
@@ -17,7 +37,6 @@ export async function seedAdmin(): Promise<void> {
     );
   }
 
-  const ctx = await auth.$context;
   const hash = await ctx.password.hash(env.ADMIN_PASSWORD);
   const utilisateur = await ctx.internalAdapter.createUser(
     {

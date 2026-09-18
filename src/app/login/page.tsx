@@ -14,13 +14,18 @@ export default function Connexion() {
     evenement.preventDefault();
     setEnCours(true);
     setErreur(null);
-    const { error } = await signIn.email({ email, password: motDePasse });
-    setEnCours(false);
-    if (error) {
-      setErreur("Identifiants incorrects.");
-      return;
+    try {
+      const { error } = await signIn.email({ email, password: motDePasse });
+      if (error) {
+        setErreur("Identifiants incorrects.");
+        return;
+      }
+      router.push("/connexion");
+    } catch {
+      setErreur("Problème de connexion réseau. Réessayez.");
+    } finally {
+      setEnCours(false);
     }
-    router.push("/connexion");
   }
 
   return (

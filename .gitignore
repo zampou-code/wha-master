@@ -8,3 +8,4 @@ dist/
 src/generated/
 next-env.d.ts
 *.tsbuildinfo
+docs/prive/

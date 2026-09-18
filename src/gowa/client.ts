@@ -1,6 +1,8 @@
 import type { z } from "zod";
 import { getEnv } from "@/config/env";
 import {
+  devicesListSchema,
+  deviceCreateSchema,
   loginSchema,
   presenceSchema,
   sendSchema,
@@ -22,6 +24,14 @@ export interface GowaClientOptions {
   basicAuth: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  webhookUrl?: string;
+  webhookSecret?: string;
+}
+
+export interface EnsureDeviceParams {
+  deviceId?: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
 }
 
 export class GowaClient {
@@ -33,34 +43,49 @@ export class GowaClient {
     this.timeoutMs = options.timeoutMs ?? 15_000;
   }
 
-  private async appeler<T>(
-    chemin: string,
-    schema: z.ZodType<T>,
-    init?: { method?: string; body?: unknown },
-  ): Promise<T> {
+  private construireEnTetes(deviceId?: string, avecJson = true): Record<string, string> {
+    const encode = Buffer.from(this.options.basicAuth).toString("base64");
+    const entetes: Record<string, string> = { Authorization: `Basic ${encode}` };
+    if (avecJson) entetes["Content-Type"] = "application/json";
+    if (deviceId) entetes["X-Device-Id"] = deviceId;
+    return entetes;
+  }
+
+  private async requeteBrute(
+    url: string,
+    description: string,
+    init: { method?: string; body?: unknown; deviceId?: string; avecJson?: boolean },
+  ): Promise<Response> {
     const controleur = new AbortController();
     const minuteur = setTimeout(() => controleur.abort(), this.timeoutMs);
-    const encode = Buffer.from(this.options.basicAuth).toString("base64");
 
-    let reponse: Response;
     try {
-      reponse = await this.fetchImpl(`${this.options.baseUrl}${chemin}`, {
-        method: init?.method ?? "GET",
-        headers: {
-          Authorization: `Basic ${encode}`,
-          "Content-Type": "application/json",
-        },
-        body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+      return await this.fetchImpl(url, {
+        method: init.method ?? "GET",
+        headers: this.construireEnTetes(init.deviceId, init.avecJson ?? true),
+        body: init.body === undefined ? undefined : JSON.stringify(init.body),
         signal: controleur.signal,
       });
     } catch (erreur) {
       if (erreur instanceof Error && erreur.name === "AbortError") {
-        throw new GowaError(`GOWA n'a pas répondu dans le délai imparti (${chemin})`);
+        throw new GowaError(`GOWA n'a pas répondu dans le délai imparti (${description})`);
       }
-      throw new GowaError(`GOWA injoignable (${chemin}) : ${String(erreur)}`);
+      throw new GowaError(`GOWA injoignable (${description}) : ${String(erreur)}`);
     } finally {
       clearTimeout(minuteur);
     }
+  }
+
+  private async appeler<T>(
+    chemin: string,
+    schema: z.ZodType<T>,
+    init?: { method?: string; body?: unknown; deviceId?: string },
+  ): Promise<T> {
+    const reponse = await this.requeteBrute(`${this.options.baseUrl}${chemin}`, chemin, {
+      method: init?.method,
+      body: init?.body,
+      deviceId: init?.deviceId,
+    });
 
     if (!reponse.ok) {
       throw new GowaError(`GOWA a répondu ${reponse.status} sur ${chemin}`, reponse.status);
@@ -80,8 +105,8 @@ export class GowaClient {
     return resultat.data;
   }
 
-  async getStatus(): Promise<GowaStatus> {
-    const { results } = await this.appeler("/app/status", statusSchema);
+  async getStatus(deviceId?: string): Promise<GowaStatus> {
+    const { results } = await this.appeler("/app/status", statusSchema, { deviceId });
     return {
       isConnected: results.is_connected,
       isLoggedIn: results.is_logged_in,
@@ -90,15 +115,76 @@ export class GowaClient {
     };
   }
 
-  async getLoginQr(): Promise<GowaLoginQr> {
-    const { results } = await this.appeler("/app/login", loginSchema);
+  async getLoginQr(deviceId?: string): Promise<GowaLoginQr> {
+    const { results } = await this.appeler("/app/login", loginSchema, { deviceId });
     return {
-      code: results.code,
-      // NOTE: Go's time.Duration serialization is ambiguous (seconds vs nanoseconds).
-      // Implemented as per brief; Task 9 will verify against real instance.
-      durationSec: Math.round(results.duration),
-      imagePath: results.image_path,
+      deviceId: results.device_id,
+      qrLink: results.qr_link,
+      qrDurationSec: Math.round(results.qr_duration),
     };
+  }
+
+  async listDevices(): Promise<string[]> {
+    const { results } = await this.appeler("/devices", devicesListSchema);
+    return results.map((appareil) => appareil.device_id);
+  }
+
+  async createDevice(params: EnsureDeviceParams = {}): Promise<string> {
+    const corps: Record<string, unknown> = {};
+    if (params.deviceId) corps.device_id = params.deviceId;
+    if (params.webhookUrl) corps.webhook_url = params.webhookUrl;
+    if (params.webhookSecret) corps.webhook_secret = params.webhookSecret;
+
+    const { results } = await this.appeler("/devices", deviceCreateSchema, {
+      method: "POST",
+      body: corps,
+    });
+    return results.device_id;
+  }
+
+  async ensureDevice(params: EnsureDeviceParams = {}): Promise<string> {
+    const appareils = await this.listDevices();
+    if (appareils.length > 0) return appareils[0];
+    return this.createDevice({
+      deviceId: params.deviceId,
+      webhookUrl: params.webhookUrl ?? this.options.webhookUrl,
+      webhookSecret: params.webhookSecret ?? this.options.webhookSecret,
+    });
+  }
+
+  async fetchQrImage(qrLink: string): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+    let url: URL;
+    try {
+      url = new URL(qrLink);
+    } catch {
+      throw new GowaError(`Lien d'image QR invalide : ${qrLink}`);
+    }
+
+    let origineAutorisee: URL;
+    try {
+      origineAutorisee = new URL(this.options.baseUrl);
+    } catch {
+      throw new GowaError("GOWA_BASE_URL invalide, impossible de vérifier l'origine du QR");
+    }
+
+    // Contrainte de sécurité : n'accepter que des URL dont l'origine est
+    // exactement GOWA_BASE_URL. Sans ce contrôle, une réponse GOWA compromise
+    // (ou un GOWA_BASE_URL mal configuré) transformerait cette route en proxy
+    // ouvert (SSRF) : n'importe quelle origine passée dans qr_link serait
+    // relayée telle quelle vers le client.
+    if (url.origin !== origineAutorisee.origin) {
+      throw new GowaError(`Origine du lien QR refusée (${url.origin}), hors de GOWA_BASE_URL`);
+    }
+
+    const reponse = await this.requeteBrute(url.toString(), "image QR", { avecJson: false });
+
+    if (!reponse.ok) {
+      throw new GowaError(`GOWA a répondu ${reponse.status} sur l'image QR`, reponse.status);
+    }
+
+    const contentType = reponse.headers.get("content-type") ?? "image/png";
+    const bytes = await reponse.arrayBuffer();
+    return { bytes, contentType };
   }
 
   async sendText(params: {
@@ -119,5 +205,10 @@ export class GowaClient {
 
 export function createGowaClient(): GowaClient {
   const env = getEnv();
-  return new GowaClient({ baseUrl: env.GOWA_BASE_URL, basicAuth: env.GOWA_BASIC_AUTH });
+  return new GowaClient({
+    baseUrl: env.GOWA_BASE_URL,
+    basicAuth: env.GOWA_BASIC_AUTH,
+    webhookUrl: "http://app:3000/api/webhook/gowa",
+    webhookSecret: env.GOWA_WEBHOOK_SECRET,
+  });
 }

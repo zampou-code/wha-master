@@ -38,11 +38,17 @@ describe("GowaClient", () => {
 
   it("normalise la réponse de login en convertissant la durée", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: { code: "2@abc", duration: 30, image_path: "/statics/images/qrcode/a.png" } }),
+      reponseJson({
+        status: 200,
+        code: "SUCCESS",
+        message: "Login success",
+        results: { device_id: "d1", qr_link: "http://gowa:3000/statics/images/qrcode/a.png", qr_duration: 30 },
+      }),
     );
     const qr = await clientAvec(fetchMock as unknown as typeof fetch).getLoginQr();
-    expect(qr.code).toBe("2@abc");
-    expect(qr.durationSec).toBe(30);
+    expect(qr.deviceId).toBe("d1");
+    expect(qr.qrLink).toBe("http://gowa:3000/statics/images/qrcode/a.png");
+    expect(qr.qrDurationSec).toBe(30);
   });
 
   it("transmet phone et message au bon endpoint", async () => {
@@ -73,5 +79,60 @@ describe("GowaClient", () => {
       }),
     );
     await expect(clientAvec(fetchMock as unknown as typeof fetch).getStatus()).rejects.toThrow(/délai/);
+  });
+
+  describe("ensureDevice", () => {
+    it("crée un appareil quand la liste est vide", async () => {
+      const fetchMock = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+        if (init.method === "POST") {
+          return Promise.resolve(
+            reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: { device_id: "nouveau" } }),
+          );
+        }
+        return Promise.resolve(
+          reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: [] }),
+        );
+      });
+      const idAppareil = await clientAvec(fetchMock as unknown as typeof fetch).ensureDevice();
+      expect(idAppareil).toBe("nouveau");
+      const appelsCreation = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit).method === "POST");
+      expect(appelsCreation).toHaveLength(1);
+    });
+
+    it("n'en crée pas quand un appareil existe déjà", async () => {
+      const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+        if (init?.method === "POST") {
+          throw new Error("createDevice n'aurait pas dû être appelé");
+        }
+        return Promise.resolve(
+          reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: [{ device_id: "existant" }] }),
+        );
+      });
+      const idAppareil = await clientAvec(fetchMock as unknown as typeof fetch).ensureDevice();
+      expect(idAppareil).toBe("existant");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("fetchQrImage", () => {
+    it("rejette une URL hors de GOWA_BASE_URL (non-régression SSRF)", async () => {
+      const fetchMock = vi.fn();
+      await expect(
+        clientAvec(fetchMock as unknown as typeof fetch).fetchQrImage("http://attaquant.example.com/image.png"),
+      ).rejects.toBeInstanceOf(GowaError);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("relaie les octets d'une image dont l'origine correspond à GOWA_BASE_URL", async () => {
+      const octets = new Uint8Array([1, 2, 3]).buffer;
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(octets, { status: 200, headers: { "content-type": "image/png" } }),
+      );
+      const resultat = await clientAvec(fetchMock as unknown as typeof fetch).fetchQrImage(
+        "http://gowa:3000/statics/images/qrcode/a.png",
+      );
+      expect(resultat.contentType).toBe("image/png");
+      expect(new Uint8Array(resultat.bytes)).toEqual(new Uint8Array([1, 2, 3]));
+    });
   });
 });

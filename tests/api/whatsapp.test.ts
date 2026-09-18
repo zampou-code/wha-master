@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getSession = vi.fn();
 const getStatus = vi.fn();
 const getLoginQr = vi.fn();
+const ensureDevice = vi.fn();
+const fetchQrImage = vi.fn();
 
 // L'environnement est simulé uniquement parce que @/lib/auth (importé réellement
 // ci-dessous) instancie Better Auth et Prisma au chargement du module, ce qui
@@ -35,11 +37,14 @@ vi.mock("@/lib/auth", async (importOriginal) => {
 
 vi.mock("@/gowa/client", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/gowa/client")>();
-  return { ...original, createGowaClient: () => ({ getStatus, getLoginQr }) };
+  return {
+    ...original,
+    createGowaClient: () => ({ getStatus, getLoginQr, ensureDevice, fetchQrImage }),
+  };
 });
 
-function requete(): Request {
-  return new Request("https://wha.example.com/api/whatsapp/status");
+function requete(chemin = "/api/whatsapp/status"): Request {
+  return new Request(`https://wha.example.com${chemin}`);
 }
 
 describe("routes WhatsApp", () => {
@@ -47,12 +52,16 @@ describe("routes WhatsApp", () => {
     getSession.mockReset();
     getStatus.mockReset();
     getLoginQr.mockReset();
+    ensureDevice.mockReset();
+    fetchQrImage.mockReset();
+    ensureDevice.mockResolvedValue("d1");
   });
 
   it("refuse le statut sans session", async () => {
     getSession.mockResolvedValue(null);
     const { GET } = await import("@/app/api/whatsapp/status/route");
     expect((await GET(requete())).status).toBe(401);
+    expect(ensureDevice).not.toHaveBeenCalled();
     expect(getStatus).not.toHaveBeenCalled();
   });
 
@@ -62,28 +71,84 @@ describe("routes WhatsApp", () => {
     const { GET } = await import("@/app/api/whatsapp/status/route");
     const reponse = await GET(requete());
     expect(reponse.status).toBe(200);
+    expect(ensureDevice).toHaveBeenCalledTimes(1);
+    expect(getStatus).toHaveBeenCalledWith("d1");
     await expect(reponse.json()).resolves.toMatchObject({ isLoggedIn: true });
   });
 
   it("refuse le QR sans session", async () => {
     getSession.mockResolvedValue(null);
     const { GET } = await import("@/app/api/whatsapp/qr/route");
-    expect((await GET(requete())).status).toBe(401);
+    expect((await GET(requete("/api/whatsapp/qr"))).status).toBe(401);
+    expect(ensureDevice).not.toHaveBeenCalled();
     expect(getLoginQr).not.toHaveBeenCalled();
   });
 
-  it("renvoie le code QR sans jamais exposer image_path", async () => {
+  it("renvoie durationSec et une URL relative d'image, sans jamais exposer qr_link", async () => {
     getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
-    getLoginQr.mockResolvedValue({ code: "2@abc", durationSec: 30, imagePath: "/statics/a.png" });
+    getLoginQr.mockResolvedValue({
+      deviceId: "d1",
+      qrLink: "http://gowa-interne:3000/statics/images/qrcode/a.png",
+      qrDurationSec: 30,
+    });
     const { GET } = await import("@/app/api/whatsapp/qr/route");
-    const corps = await (await GET(requete())).json();
-    expect(corps).toEqual({ code: "2@abc", durationSec: 30 });
+    const reponse = await GET(requete("/api/whatsapp/qr"));
+    const corps = await reponse.json();
+    expect(corps).toEqual({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" });
+    expect(JSON.stringify(corps)).not.toContain("gowa-interne");
+    expect(JSON.stringify(corps)).not.toContain("qr_link");
   });
 
-  it("répond 502 quand GOWA est injoignable", async () => {
+  it("répond 502 et journalise l'erreur réelle quand GOWA est injoignable", async () => {
     getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
     getStatus.mockRejectedValue(new Error("GOWA injoignable"));
+    const espionConsole = vi.spyOn(console, "error").mockImplementation(() => {});
     const { GET } = await import("@/app/api/whatsapp/status/route");
-    expect((await GET(requete())).status).toBe(502);
+    const reponse = await GET(requete());
+    expect(reponse.status).toBe(502);
+    expect(espionConsole).toHaveBeenCalled();
+    const messageJournalise = espionConsole.mock.calls[0].join(" ");
+    expect(messageJournalise).toContain("GOWA injoignable");
+    espionConsole.mockRestore();
+  });
+
+  describe("route image QR (/api/whatsapp/qr/image)", () => {
+    it("refuse l'image sans session et n'appelle jamais GOWA", async () => {
+      getSession.mockResolvedValue(null);
+      const { GET } = await import("@/app/api/whatsapp/qr/image/route");
+      const reponse = await GET(requete("/api/whatsapp/qr/image"));
+      expect(reponse.status).toBe(401);
+      expect(ensureDevice).not.toHaveBeenCalled();
+      expect(getLoginQr).not.toHaveBeenCalled();
+      expect(fetchQrImage).not.toHaveBeenCalled();
+    });
+
+    it("relaie les octets de l'image avec le bon Content-Type et Cache-Control: no-store", async () => {
+      getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
+      getLoginQr.mockResolvedValue({
+        deviceId: "d1",
+        qrLink: "http://gowa-interne:3000/statics/images/qrcode/a.png",
+        qrDurationSec: 30,
+      });
+      fetchQrImage.mockResolvedValue({
+        bytes: new Uint8Array([1, 2, 3]).buffer,
+        contentType: "image/png",
+      });
+      const { GET } = await import("@/app/api/whatsapp/qr/image/route");
+      const reponse = await GET(requete("/api/whatsapp/qr/image"));
+      expect(reponse.status).toBe(200);
+      expect(reponse.headers.get("Content-Type")).toBe("image/png");
+      expect(reponse.headers.get("Cache-Control")).toBe("no-store");
+      const octets = new Uint8Array(await reponse.arrayBuffer());
+      expect(octets).toEqual(new Uint8Array([1, 2, 3]));
+    });
+
+    it("répond 502 quand GOWA est injoignable pour l'image", async () => {
+      getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
+      getLoginQr.mockRejectedValue(new Error("GOWA injoignable"));
+      const { GET } = await import("@/app/api/whatsapp/qr/image/route");
+      const reponse = await GET(requete("/api/whatsapp/qr/image"));
+      expect(reponse.status).toBe(502);
+    });
   });
 });

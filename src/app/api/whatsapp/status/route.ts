@@ -12,9 +12,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const statut = await createGowaClient().getStatus();
+    const client = createGowaClient();
+    const idAppareil = await client.ensureDevice();
+    const statut = await client.getStatus(idAppareil);
     return NextResponse.json(statut);
-  } catch {
+  } catch (erreur) {
+    // L'absence de journalisation ici a déjà coûté une heure de diagnostic :
+    // sans elle, un 502 est muet et ne dit rien de la cause réelle côté GOWA.
+    console.error("Échec de récupération du statut GOWA :", erreur instanceof Error ? erreur.message : erreur);
     return NextResponse.json({ erreur: "WhatsApp injoignable" }, { status: 502 });
   }
 }

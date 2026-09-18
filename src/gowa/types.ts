@@ -19,9 +19,9 @@ export const statusSchema = enveloppe(
 
 export const loginSchema = enveloppe(
   z.object({
-    code: z.string(),
-    duration: z.number(),
-    image_path: z.string().optional(),
+    device_id: z.string(),
+    qr_link: z.string(),
+    qr_duration: z.number(),
   }),
 );
 
@@ -34,6 +34,14 @@ export const sendSchema = enveloppe(
 
 export const presenceSchema = enveloppe(z.unknown());
 
+export const deviceSchema = z.looseObject({
+  device_id: z.string(),
+});
+
+export const devicesListSchema = enveloppe(z.array(deviceSchema));
+
+export const deviceCreateSchema = enveloppe(deviceSchema);
+
 export type GowaStatus = {
   isConnected: boolean;
   isLoggedIn: boolean;
@@ -42,9 +50,9 @@ export type GowaStatus = {
 };
 
 export type GowaLoginQr = {
-  code: string;
-  durationSec: number;
-  imagePath?: string;
+  deviceId: string;
+  qrLink: string;
+  qrDurationSec: number;
 };
 
 export type GowaSendResult = {

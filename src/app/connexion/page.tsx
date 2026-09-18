@@ -14,6 +14,9 @@ export default function Appairage() {
   const [sourceQr, setSourceQr] = useState<string | null>(null);
   const [codeExpire, setCodeExpire] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
+  const [telephone, setTelephone] = useState("");
+  const [codeAppairage, setCodeAppairage] = useState<string | null>(null);
+  const [demandeCodeEnCours, setDemandeCodeEnCours] = useState(false);
 
   // Garde par ref, pas par effet secondaire dans un updater de useState : React
   // peut invoquer un updater plusieurs fois (Strict Mode en dev) sans que ce soit
@@ -139,6 +142,37 @@ export default function Appairage() {
     };
   }, [annulerMinuteurExpiration]);
 
+  async function demanderCodeParNumero() {
+    setDemandeCodeEnCours(true);
+    setErreur(null);
+    try {
+      const reponse = await fetch("/api/whatsapp/pair-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telephone }),
+      });
+      if (reponse.status === 401) {
+        router.push("/login");
+        return;
+      }
+      const corps = (await reponse.json()) as { code?: string; erreur?: string };
+      if (!reponse.ok) {
+        setErreur(corps.erreur ?? "Impossible d'obtenir un code d'appairage.");
+        return;
+      }
+      setCodeAppairage(corps.code ?? null);
+    } catch {
+      setErreur(MESSAGE_RESEAU);
+    } finally {
+      setDemandeCodeEnCours(false);
+    }
+  }
+
+  function declencherDemandeCode(evenement: React.FormEvent) {
+    evenement.preventDefault();
+    demanderCodeParNumero().catch(() => setErreur(MESSAGE_RESEAU));
+  }
+
   function declencherRegeneration() {
     // Gestionnaire synchrone plutôt qu'un onClick async brut : même si
     // demanderQr() ne rejette plus (elle intercepte déjà ses propres erreurs),
@@ -198,6 +232,36 @@ export default function Appairage() {
             <button type="button" className="bouton-secondaire" onClick={declencherRegeneration}>
               Régénérer le code
             </button>
+
+            <section className="appairage-numero">
+              <h2 className="appairage-numero__titre">Appairer avec ton numéro</h2>
+              <p className="appairage-numero__aide">
+                Si le scan est refusé, WhatsApp accepte aussi un code à saisir. Dans WhatsApp,
+                choisis « Connecter plutôt avec un numéro de téléphone ».
+              </p>
+              <form onSubmit={declencherDemandeCode} className="appairage-numero__formulaire">
+                <label htmlFor="telephone">Numéro au format international, sans le signe plus</label>
+                <input
+                  id="telephone"
+                  name="telephone"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder="225XXXXXXXX"
+                  value={telephone}
+                  onChange={(evenement) => setTelephone(evenement.target.value)}
+                  required
+                />
+                <button type="submit" className="bouton-secondaire" disabled={demandeCodeEnCours}>
+                  {demandeCodeEnCours ? "Demande en cours…" : "Obtenir un code"}
+                </button>
+              </form>
+              {codeAppairage && (
+                <p className="appairage-numero__code" aria-live="polite">
+                  {codeAppairage}
+                </p>
+              )}
+            </section>
           </>
         )}
       </div>

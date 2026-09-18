@@ -55,6 +55,15 @@ export const devicesListSchema = enveloppe(
 
 export const deviceCreateSchema = enveloppe(deviceSchema);
 
+// Appairage par numéro : GOWA renvoie un code court que l'opérateur saisit
+// dans WhatsApp. Forme vérifiée dans src/ui/rest/app.go (LoginWithCode).
+export const pairCodeSchema = enveloppe(
+  z.looseObject({
+    device_id: z.string(),
+    pair_code: z.string(),
+  }),
+);
+
 export type GowaStatus = {
   isConnected: boolean;
   isLoggedIn: boolean;

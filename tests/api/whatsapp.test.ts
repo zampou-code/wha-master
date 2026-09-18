@@ -5,6 +5,7 @@ const getStatus = vi.fn();
 const getLoginQr = vi.fn();
 const ensureDevice = vi.fn();
 const fetchQrImage = vi.fn();
+const loginWithCode = vi.fn();
 
 // L'environnement est simulé uniquement parce que @/lib/auth (importé réellement
 // ci-dessous) instancie Better Auth et Prisma au chargement du module, ce qui
@@ -39,7 +40,7 @@ vi.mock("@/gowa/client", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/gowa/client")>();
   return {
     ...original,
-    createGowaClient: () => ({ getStatus, getLoginQr, ensureDevice, fetchQrImage }),
+    createGowaClient: () => ({ getStatus, getLoginQr, ensureDevice, fetchQrImage, loginWithCode }),
   };
 });
 
@@ -50,6 +51,7 @@ function requete(chemin = "/api/whatsapp/status"): Request {
 describe("routes WhatsApp", () => {
   beforeEach(() => {
     getSession.mockReset();
+    loginWithCode.mockReset();
     getStatus.mockReset();
     getLoginQr.mockReset();
     ensureDevice.mockReset();
@@ -111,6 +113,59 @@ describe("routes WhatsApp", () => {
     const messageJournalise = espionConsole.mock.calls[0].join(" ");
     expect(messageJournalise).toContain("GOWA injoignable");
     espionConsole.mockRestore();
+  });
+
+  describe("appairage par numéro (/api/whatsapp/pair-code)", () => {
+    function requetePost(corps: unknown): Request {
+      return new Request("https://wha.example.com/api/whatsapp/pair-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corps),
+      });
+    }
+
+    it("refuse sans session et n'appelle jamais GOWA", async () => {
+      getSession.mockResolvedValue(null);
+      const { POST } = await import("@/app/api/whatsapp/pair-code/route");
+      const reponse = await POST(requetePost({ telephone: "225010203040" }));
+      expect(reponse.status).toBe(401);
+      expect(ensureDevice).not.toHaveBeenCalled();
+      expect(loginWithCode).not.toHaveBeenCalled();
+    });
+
+    it("refuse un numéro absent en 400, sans toucher GOWA", async () => {
+      getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
+      const { POST } = await import("@/app/api/whatsapp/pair-code/route");
+      const reponse = await POST(requetePost({}));
+      expect(reponse.status).toBe(400);
+      expect(loginWithCode).not.toHaveBeenCalled();
+    });
+
+    it("renvoie le code d'appairage", async () => {
+      getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
+      ensureDevice.mockResolvedValue("d1");
+      loginWithCode.mockResolvedValue("ABCD-1234");
+      const { POST } = await import("@/app/api/whatsapp/pair-code/route");
+      const reponse = await POST(requetePost({ telephone: "225 01 02 03 04" }));
+      expect(reponse.status).toBe(200);
+      await expect(reponse.json()).resolves.toEqual({ code: "ABCD-1234" });
+      expect(loginWithCode).toHaveBeenCalledWith("225 01 02 03 04", "d1");
+    });
+
+    it("distingue un numéro invalide (400) d'une panne GOWA (502)", async () => {
+      getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
+      ensureDevice.mockResolvedValue("d1");
+      const espion = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      loginWithCode.mockRejectedValueOnce(new Error("Numéro invalide : indique-le au format international, sans le signe plus"));
+      const { POST } = await import("@/app/api/whatsapp/pair-code/route");
+      expect((await POST(requetePost({ telephone: "12" }))).status).toBe(400);
+
+      loginWithCode.mockRejectedValueOnce(new Error("GOWA injoignable"));
+      expect((await POST(requetePost({ telephone: "225010203040" }))).status).toBe(502);
+
+      espion.mockRestore();
+    });
   });
 
   describe("route image QR (/api/whatsapp/qr/image)", () => {

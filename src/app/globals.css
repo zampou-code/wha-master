@@ -266,3 +266,64 @@ button,
   min-height: 44px;
   padding: 10px 14px;
 }
+
+/* Appairage par numéro : voie alternative au QR, présentée comme un recours
+   et non comme l'option principale — d'où le séparateur et la hiérarchie
+   typographique en retrait. Le code renvoyé est la seule chose que
+   l'opérateur doit recopier : il est traité comme une donnée à lire, espacée
+   et en grand, pas comme du texte courant. */
+.appairage-numero {
+  border-top: 1px solid var(--petrole-clair);
+  padding-top: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.appairage-numero__titre {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+
+.appairage-numero__aide {
+  color: var(--brume-faible);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0 0 1rem;
+  max-width: 44ch;
+}
+
+.appairage-numero__formulaire {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.appairage-numero__formulaire label {
+  color: var(--brume-faible);
+  font-size: 0.85rem;
+}
+
+.appairage-numero__formulaire input {
+  min-height: 44px;
+  padding: 0 0.75rem;
+  background: var(--petrole-clair);
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--brume);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.appairage-numero__formulaire input:focus-visible {
+  outline: 2px solid var(--sodium);
+  outline-offset: 1px;
+}
+
+.appairage-numero__code {
+  margin: 1rem 0 0;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  font-variant-numeric: tabular-nums;
+  color: var(--sodium);
+}

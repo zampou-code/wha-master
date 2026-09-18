@@ -7,6 +7,7 @@ import {
   presenceSchema,
   sendSchema,
   statusSchema,
+  pairCodeSchema,
   type GowaLoginQr,
   type GowaSendResult,
   type GowaStatus,
@@ -160,6 +161,25 @@ export class GowaClient {
       webhookUrl: params.webhookUrl ?? this.options.webhookUrl,
       webhookSecret: params.webhookSecret ?? this.options.webhookSecret,
     });
+  }
+
+  /**
+   * Appairage par numéro de téléphone, alternative au QR code. WhatsApp
+   * applique au QR une limitation anti-abus (« Impossible de connecter de
+   * nouveaux appareils pour le moment ») qui ne vise pas nécessairement ce
+   * canal. Le numéro part au format international sans le signe plus.
+   */
+  async loginWithCode(telephone: string, deviceId?: string): Promise<string> {
+    const numero = telephone.replace(/[^0-9]/g, "");
+    if (numero.length < 8 || numero.length > 15) {
+      throw new GowaError("Numéro invalide : indique-le au format international, sans le signe plus");
+    }
+    const { results } = await this.appeler(
+      `/app/login-with-code?phone=${encodeURIComponent(numero)}`,
+      pairCodeSchema,
+      { deviceId },
+    );
+    return results.pair_code;
   }
 
   async fetchQrImage(qrLink: string): Promise<{ bytes: ArrayBuffer; contentType: string }> {

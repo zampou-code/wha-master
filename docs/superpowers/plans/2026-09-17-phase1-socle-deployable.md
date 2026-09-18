@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22, pnpm, Next.js 16 (App Router), TypeScript strict, Prisma 7 + `@prisma/adapter-pg`, PostgreSQL 16, Better Auth, zod, Vitest, Docker Compose, Dokploy/Traefik.
 
-**Spec:** `docs/superpowers/specs/2026-09-17-whatsapp-harness-design.md`
+**Spec:** document de conception tenu hors du dépôt public. Les contraintes qu'il impose sont reproduites intégralement dans la section « Global Constraints » ci-dessous.
 
 ## Global Constraints
 

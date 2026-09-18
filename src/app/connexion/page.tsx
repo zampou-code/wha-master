@@ -11,8 +11,7 @@ const URL_IMAGE_QR = "/api/whatsapp/qr/image";
 export default function Appairage() {
   const router = useRouter();
   const [statut, setStatut] = useState<Statut | null>(null);
-  const [qrPret, setQrPret] = useState(false);
-  const [versionQr, setVersionQr] = useState(0);
+  const [sourceQr, setSourceQr] = useState<string | null>(null);
   const [codeExpire, setCodeExpire] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
 
@@ -23,6 +22,10 @@ export default function Appairage() {
   // non-apparié » et survit sans problème à un double montage Strict Mode.
   const demandeEnCoursRef = useRef(false);
   const minuteurExpirationRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // L'image du QR arrive en octets, pas en URL : on la matérialise en URL
+  // d'objet. Elle doit être révoquée à chaque remplacement et au démontage,
+  // sinon chaque régénération fuit un blob dans la mémoire de l'onglet.
+  const urlObjetRef = useRef<string | null>(null);
 
   const annulerMinuteurExpiration = useCallback(() => {
     if (minuteurExpirationRef.current !== null) {
@@ -51,10 +54,20 @@ export default function Appairage() {
     setStatut(await reponse.json());
   }, [router]);
 
+  const remplacerImage = useCallback((blob: Blob) => {
+    if (urlObjetRef.current !== null) URL.revokeObjectURL(urlObjetRef.current);
+    const url = URL.createObjectURL(blob);
+    urlObjetRef.current = url;
+    setSourceQr(url);
+  }, []);
+
   const demanderQr = useCallback(async () => {
     let reponse: Response;
     try {
-      reponse = await fetch("/api/whatsapp/qr");
+      // Un seul appel : cette route relaie les octets ET annonce la durée de
+      // validité en en-tête. Un second appel annulerait la session d'appairage
+      // que celui-ci vient d'ouvrir côté GOWA.
+      reponse = await fetch(`${URL_IMAGE_QR}?v=${Date.now()}`);
     } catch {
       setErreur(MESSAGE_RESEAU);
       return;
@@ -67,16 +80,12 @@ export default function Appairage() {
       setErreur("Impossible d'obtenir le QR code.");
       return;
     }
-    const { durationSec } = (await reponse.json()) as { durationSec: number; imageUrl: string };
+
+    const duree = Number(reponse.headers.get("X-QR-Duration"));
+    const dureeSec = Number.isFinite(duree) && duree > 0 ? duree : 20;
+    remplacerImage(await reponse.blob());
     setErreur(null);
     setCodeExpire(false);
-    // L'image est relayée par une route de même origine (jamais qr_link, qui
-    // pointe vers GOWA et n'est pas joignable depuis le navigateur). L'URL de
-    // cette route est stable : seul ce paramètre de version change, pour forcer
-    // le navigateur à recharger l'image à chaque nouveau code plutôt que de
-    // garder affiché celui, expiré, du cycle précédent.
-    setVersionQr(Date.now());
-    setQrPret(true);
 
     // Un code d'appairage WhatsApp vit environ 20 à 30 secondes. Sans ce
     // minuteur, un opérateur qui va chercher son téléphone et revient après ce
@@ -86,8 +95,8 @@ export default function Appairage() {
     minuteurExpirationRef.current = setTimeout(() => {
       setCodeExpire(true);
       void demanderQr();
-    }, durationSec * 1000);
-  }, [router, annulerMinuteurExpiration]);
+    }, dureeSec * 1000);
+  }, [router, annulerMinuteurExpiration, remplacerImage]);
 
   useEffect(() => {
     void rafraichirStatut();
@@ -104,7 +113,7 @@ export default function Appairage() {
     if (statut?.isLoggedIn) {
       annulerMinuteurExpiration();
       demandeEnCoursRef.current = false;
-      setQrPret(false);
+      setSourceQr(null);
       setCodeExpire(false);
       return;
     }
@@ -118,7 +127,10 @@ export default function Appairage() {
   // Nettoyage au démontage : indépendant du cycle ci-dessus, pour ne jamais
   // laisser un minuteur d'expiration tourner sur un composant qui n'existe plus.
   useEffect(() => {
-    return () => annulerMinuteurExpiration();
+    return () => {
+      annulerMinuteurExpiration();
+      if (urlObjetRef.current !== null) URL.revokeObjectURL(urlObjetRef.current);
+    };
   }, [annulerMinuteurExpiration]);
 
   function declencherRegeneration() {
@@ -165,9 +177,9 @@ export default function Appairage() {
             <div className="cadre-qr">
               {codeExpire ? (
                 <p className="cadre-qr__message">Code expiré. Nouveau code en préparation.</p>
-              ) : qrPret ? (
+              ) : sourceQr ? (
                 <img
-                  src={`${URL_IMAGE_QR}?v=${versionQr}`}
+                  src={sourceQr}
                   alt="QR code d'appairage WhatsApp"
                   width={320}
                   height={320}

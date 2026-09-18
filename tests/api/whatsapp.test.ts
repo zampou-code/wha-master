@@ -76,27 +76,28 @@ describe("routes WhatsApp", () => {
     await expect(reponse.json()).resolves.toMatchObject({ isLoggedIn: true });
   });
 
-  it("refuse le QR sans session", async () => {
-    getSession.mockResolvedValue(null);
-    const { GET } = await import("@/app/api/whatsapp/qr/route");
-    expect((await GET(requete("/api/whatsapp/qr"))).status).toBe(401);
-    expect(ensureDevice).not.toHaveBeenCalled();
-    expect(getLoginQr).not.toHaveBeenCalled();
-  });
-
-  it("renvoie durationSec et une URL relative d'image, sans jamais exposer qr_link", async () => {
+  it("n'appelle GOWA qu'une seule fois par affichage de QR", async () => {
+    // Régression observée en production : deux routes appelaient chacune
+    // GET /app/login. Or chaque appel ouvre une NOUVELLE session d'appairage et
+    // annule la précédente (« QR context canceled while sending QR path » côté
+    // GOWA), si bien que le code affiché était déjà mort et que le scan ne
+    // pouvait pas aboutir. Une seule route doit donc toucher GOWA.
     getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
     getLoginQr.mockResolvedValue({
       deviceId: "d1",
       qrLink: "http://gowa-interne:3000/statics/images/qrcode/a.png",
       qrDurationSec: 30,
     });
-    const { GET } = await import("@/app/api/whatsapp/qr/route");
-    const reponse = await GET(requete("/api/whatsapp/qr"));
-    const corps = await reponse.json();
-    expect(corps).toEqual({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" });
-    expect(JSON.stringify(corps)).not.toContain("gowa-interne");
-    expect(JSON.stringify(corps)).not.toContain("qr_link");
+    fetchQrImage.mockResolvedValue({
+      bytes: new Uint8Array([137, 80, 78, 71]).buffer,
+      contentType: "image/png",
+    });
+    const { GET } = await import("@/app/api/whatsapp/qr/image/route");
+    const reponse = await GET(requete("/api/whatsapp/qr/image"));
+    expect(reponse.status).toBe(200);
+    expect(getLoginQr).toHaveBeenCalledTimes(1);
+    expect(reponse.headers.get("X-QR-Duration")).toBe("30");
+    expect(reponse.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("répond 502 et journalise l'erreur réelle quand GOWA est injoignable", async () => {

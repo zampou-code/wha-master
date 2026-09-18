@@ -33,7 +33,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ code });
   } catch (erreur) {
     const message = erreur instanceof Error ? erreur.message : String(erreur);
-    log.error("Échec de l'appairage par numéro", { chemin: "/api/whatsapp/pair-code", message });
+    log.error("Échec de l'appairage par numéro", {
+      chemin: "/api/whatsapp/pair-code",
+      erreur: erreur instanceof Error ? erreur : String(erreur),
+    });
     // Un numéro mal formé est une erreur de saisie, pas une panne : on la
     // distingue pour que l'opérateur sache quoi corriger.
     if (message.includes("Numéro invalide")) {

@@ -56,4 +56,30 @@ describe("journal structuré", () => {
     expect(() => creerJournal({}, ecrire).info("x", { circulaire })).not.toThrow();
     expect(lignes).toHaveLength(1);
   });
+
+  it("réserve horodatage, niveau et message au système : un champ d'appel qui les percute est renommé plutôt que d'écraser", () => {
+    const { lignes, ecrire } = capture();
+    creerJournal({}, ecrire).info("vrai message", { message: "x" });
+    const objet = JSON.parse(lignes[0]);
+    expect(objet.message).toBe("vrai message");
+    expect(objet.champ_message).toBe("x");
+  });
+
+  it("inclut la pile d'appel pour une Error au niveau error, mais pas au niveau warn", () => {
+    const { lignes, ecrire } = capture();
+    const journal = creerJournal({}, ecrire);
+    journal.error("échec", { erreur: new Error("boum") });
+    journal.warn("avertissement", { erreur: new Error("boum") });
+    const [ligneErreur, ligneWarn] = lignes.map((l) => JSON.parse(l));
+    expect(typeof ligneErreur.erreur.pile).toBe("string");
+    expect(ligneErreur.erreur.pile).toContain("boum");
+    expect(ligneWarn.erreur.pile).toBeUndefined();
+  });
+
+  it("ne lève jamais, même si l'écrivain fourni échoue", () => {
+    const ecrireDefaillant = () => {
+      throw new Error("écriture impossible");
+    };
+    expect(() => creerJournal({}, ecrireDefaillant).info("x")).not.toThrow();
+  });
 });

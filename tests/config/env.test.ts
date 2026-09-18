@@ -15,13 +15,13 @@ const valide = {
 
 describe("parseEnv", () => {
   it("accepte une configuration complète", () => {
-    const env = parseEnv(valide as NodeJS.ProcessEnv);
+    const env = parseEnv(valide as unknown as NodeJS.ProcessEnv);
     expect(env.GOWA_BASE_URL).toBe("http://gowa:3000");
     expect(env.CONTROL_GROUP_JID).toBeUndefined();
   });
 
   it("rejette une MASTER_KEY qui n'est pas 32 octets hexadécimaux", () => {
-    expect(() => parseEnv({ ...valide, MASTER_KEY: "trop-court" } as NodeJS.ProcessEnv))
+    expect(() => parseEnv({ ...valide, MASTER_KEY: "trop-court" } as unknown as NodeJS.ProcessEnv))
       .toThrow(/MASTER_KEY/);
   });
 
@@ -31,7 +31,7 @@ describe("parseEnv", () => {
   });
 
   it("rejette un GOWA_BASIC_AUTH sans deux-points", () => {
-    expect(() => parseEnv({ ...valide, GOWA_BASIC_AUTH: "adminsecret" } as NodeJS.ProcessEnv))
+    expect(() => parseEnv({ ...valide, GOWA_BASIC_AUTH: "adminsecret" } as unknown as NodeJS.ProcessEnv))
       .toThrow(/GOWA_BASIC_AUTH/);
   });
 });
@@ -48,7 +48,7 @@ function messageDeErreur(executer: () => unknown): string {
 describe("parseEnv - messages en français uniquement", () => {
   it("rejette un BETTER_AUTH_URL invalide avec un message en français", () => {
     const message = messageDeErreur(() =>
-      parseEnv({ ...valide, BETTER_AUTH_URL: "pas-une-url" } as NodeJS.ProcessEnv),
+      parseEnv({ ...valide, BETTER_AUTH_URL: "pas-une-url" } as unknown as NodeJS.ProcessEnv),
     );
     expect(message).toMatch(/BETTER_AUTH_URL doit être une URL valide/);
     expect(message).not.toMatch(/Invalid (input|url|email|string)|expected \w+, received/);
@@ -56,7 +56,7 @@ describe("parseEnv - messages en français uniquement", () => {
 
   it("rejette un ADMIN_EMAIL invalide avec un message en français", () => {
     const message = messageDeErreur(() =>
-      parseEnv({ ...valide, ADMIN_EMAIL: "pas-un-email" } as NodeJS.ProcessEnv),
+      parseEnv({ ...valide, ADMIN_EMAIL: "pas-un-email" } as unknown as NodeJS.ProcessEnv),
     );
     expect(message).toMatch(/ADMIN_EMAIL doit être une adresse e-mail valide/);
     expect(message).not.toMatch(/Invalid (input|url|email|string)|expected \w+, received/);
@@ -64,7 +64,7 @@ describe("parseEnv - messages en français uniquement", () => {
 
   it("rejette un GOWA_BASE_URL invalide avec un message en français", () => {
     const message = messageDeErreur(() =>
-      parseEnv({ ...valide, GOWA_BASE_URL: "pas-une-url" } as NodeJS.ProcessEnv),
+      parseEnv({ ...valide, GOWA_BASE_URL: "pas-une-url" } as unknown as NodeJS.ProcessEnv),
     );
     expect(message).toMatch(/GOWA_BASE_URL doit être une URL valide/);
     expect(message).not.toMatch(/Invalid (input|url|email|string)|expected \w+, received/);

@@ -1,0 +1,63 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://wha:${POSTGRES_PASSWORD}@postgres:5432/wha
+      GOWA_BASE_URL: http://gowa:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gowa:
+        condition: service_started
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.wha.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.wha.entrypoints=websecure
+      - traefik.http.routers.wha.tls.certresolver=letsencrypt
+      - traefik.http.services.wha.loadbalancer.server.port=3000
+    networks:
+      - interne
+      - dokploy-network
+
+  gowa:
+    image: aldinokemal2104/go-whatsapp-web-multidevice:latest
+    restart: unless-stopped
+    command: rest
+    environment:
+      APP_PORT: "3000"
+      APP_BASIC_AUTH: ${GOWA_BASIC_AUTH}
+      DB_URI: file:storages/whatsapp.db
+      WHATSAPP_WEBHOOK: http://app:3000/api/webhook/gowa
+      WHATSAPP_WEBHOOK_SECRET: ${GOWA_WEBHOOK_SECRET}
+    volumes:
+      - gowa-session:/app/storages
+    networks:
+      - interne
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wha
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: wha
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wha -d wha"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - interne
+
+volumes:
+  gowa-session:
+  pg-data:
+
+networks:
+  interne:
+  dokploy-network:
+    external: true

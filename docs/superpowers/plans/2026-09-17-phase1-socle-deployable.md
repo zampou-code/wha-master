@@ -15,7 +15,7 @@
 - **P1 — Activation explicite par contact** : `Contact.mode` vaut `OFF` à la création. Aucun code de cette phase ne le change. L'ingestion qui découvre un contact le crée en `OFF`.
 - **P2 — Fail-closed** : toute anomalie mène à un non-envoi. En phase 1, aucun code d'envoi n'existe ; le principe s'applique aux erreurs de webhook (répondre en erreur plutôt que d'avaler silencieusement).
 - **P5 — Tout est tracé** : chaque message persisté conserve son `waMessageId` d'origine.
-- Node `22.x`, pnpm `9.x`.
+- Node `22.x`, pnpm `11.x` (amendé le 2026-09-17, ruling R5 : la contrainte initiale disait 9.x sans que la spec ne l'exige). `package.json` doit porter `packageManager` et `engines` pour verrouiller les deux.
 - Prisma 7 : générateur `prisma-client` (pas `prisma-client-js`), `output = "../src/generated/prisma"`, import depuis `@/generated/prisma/client`, adaptateur `PrismaPg` obligatoire.
 - Next.js 16 : le fichier de proxy est `src/proxy.ts` et exporte `proxy` (le nom `middleware` est déprécié).
 - GOWA : image `aldinokemal2104/go-whatsapp-web-multidevice`, commande `rest`, port interne `3000`, session dans `/app/storages`.
@@ -400,7 +400,8 @@ git commit -m "feat: chiffrement AES-256-GCM des secrets applicatifs"
 ### Task 3 : Schéma Prisma et base de test
 
 **Files:**
-- Create: `prisma/schema.prisma`, `src/lib/prisma.ts`, `vitest.int.config.ts`, `tests/int-setup.ts`, `tests/helpers/db.ts`
+- Create: `prisma/schema.prisma`, `prisma.config.ts`, `src/lib/prisma.ts`, `vitest.int.config.ts`, `tests/int-setup.ts`, `tests/helpers/db.ts`
+  - Note (ruling R7, 2026-09-17) : Prisma 7 refuse `url` dans le bloc `datasource`. L'URL de migration passe par `prisma.config.ts` (`defineConfig({ datasource: { url: env("DATABASE_URL") } })`). Le client d'exécution continue de la recevoir via l'adaptateur `PrismaPg`.
 - Create: `docker-compose.dev.yml`
 - Test: `tests/db/contact.int.test.ts`
 
@@ -425,7 +426,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum ContactMode {
@@ -1274,11 +1274,15 @@ export async function seedAdmin(): Promise<void> {
 
   const ctx = await auth.$context;
   const hash = await ctx.password.hash(env.ADMIN_PASSWORD);
-  const utilisateur = await ctx.internalAdapter.createUser({
-    email: env.ADMIN_EMAIL,
-    name: "Propriétaire",
-    emailVerified: true,
-  });
+  // Ruling R10 : better-auth 1.7.5 exige un second argument `source`.
+  const utilisateur = await ctx.internalAdapter.createUser(
+    {
+      email: env.ADMIN_EMAIL,
+      name: "Propriétaire",
+      emailVerified: true,
+    },
+    { method: "email-password" },
+  );
   await ctx.internalAdapter.createAccount({
     userId: utilisateur.id,
     providerId: "credential",
@@ -2384,9 +2388,15 @@ Relancer un déploiement depuis Dokploy, puis rouvrir `/connexion`.
 
 Expected: la page affiche toujours « Appareil appairé », sans nouveau QR. La session reste ouverte dans le navigateur. Si un QR réapparaît, le volume `gowa-session` n'est pas monté correctement.
 
-- [ ] **Step 8 : Vérifier la forme réelle de la durée du QR**
+- [ ] **Step 8 : Vérifier la durée du QR et l'enveloppe des réponses d'envoi**
 
 Dans les journaux du service `app`, relever la valeur brute de `duration` renvoyée par `/app/login`. Si elle est exprimée en nanosecondes, corriger `getLoginQr()` dans `src/gowa/client.ts` (diviser par 1e9) et adapter le test correspondant de Task 6.
+
+Relever également (ruling R14) la forme réelle des réponses de `POST /send/message` et
+`POST /send/chat-presence`. `sendSchema` et `presenceSchema` exigent la présence d'une clé
+`results` ; si GOWA ne l'inclut pas sur ces endpoints, un appel pourtant réussi lèverait une
+`GowaError`. Rendre `results` optionnel dans ces deux schémas le cas échéant. Ces méthodes ne
+sont appelées par aucun code avant la phase 3, mais la vérification coûte une requête ici.
 
 - [ ] **Step 9 : Configurer les sauvegardes**
 

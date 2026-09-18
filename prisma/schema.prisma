@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ContactMode {
+  OFF
+  DRAFT
+  AUTO
+}
+
+enum Direction {
+  IN
+  OUT
+}
+
+enum MessageSource {
+  HUMAN
+  AUTO
+  IMPORT
+}
+
+enum FactSource {
+  QUESTIONNAIRE
+  INFERRED
+}
+
+enum RiskCategory {
+  ENGAGEMENT
+  FACT
+  EMOTIONAL
+  MONEY
+  INTIMATE
+  THIRD_PARTY
+  LOW_CONFIDENCE
+  NON_TEXT
+}
+
+enum DecisionOutcome {
+  AUTO_SENT
+  DRAFTED
+  ESCALATED
+  IGNORED
+  EXPIRED
+}
+
+enum EscalationStatus {
+  OPEN
+  RESOLVED
+  EXPIRED
+}
+
+enum ProviderKind {
+  ANTHROPIC
+  OPENAI
+  GOOGLE
+  OPENAI_COMPATIBLE
+  OLLAMA
+}
+
+model Contact {
+  id          String      @id @default(cuid())
+  jid         String      @unique
+  pushName    String?
+  alias       String?
+  isAdult     Boolean     @default(false)
+  mode        ContactMode @default(OFF)
+  activatedAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  policy  ContactPolicy?
+  thread  Thread?
+  profile ContactProfile?
+  decisions Decision[]
+}
+
+model ContactPolicy {
+  id        String  @id @default(cuid())
+  contactId String  @unique
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  guardEngagement Boolean @default(true)
+  guardFacts      Boolean @default(true)
+  guardEmotional  Boolean @default(true)
+  guardMoney      Boolean @default(true)
+  guardIntimate   Boolean @default(true)
+  guardThirdParty Boolean @default(true)
+
+  intimateOverride Boolean @default(false)
+
+  quietHoursStart Int?
+  quietHoursEnd   Int?
+  timezone        String  @default("Africa/Abidjan")
+
+  maxAutoStreak Int @default(6)
+  minDelaySec   Int @default(45)
+  maxDelaySec   Int @default(600)
+
+  styleLength     String @default("moyen")
+  styleEmoji      String @default("parfois")
+  styleFormality  String @default("tutoiement")
+  styleLanguage   String @default("fr")
+  styleInitiative String @default("rare")
+
+  providerRouteId String?
+}
+
+model Thread {
+  id        String  @id @default(cuid())
+  contactId String  @unique
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  rollingSummary          String   @default("")
+  lastSummarizedMessageId String?
+  relationStage           String   @default("inconnu")
+  medianReplyDelaySec     Int?
+  autoStreak              Int      @default(0)
+  lastMessageAt           DateTime?
+
+  messages Message[]
+}
+
+model Message {
+  id          String        @id @default(cuid())
+  threadId    String
+  thread      Thread        @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  waMessageId String        @unique
+  direction   Direction
+  source      MessageSource
+  text        String?
+  mediaType   String?
+  timestamp   DateTime
+  replyToWaId String?
+  createdAt   DateTime      @default(now())
+
+  decision Decision?
+
+  @@index([threadId, timestamp])
+}
+
+model PersonaProfile {
+  id         String   @id @default("self")
+  styleGuide Json     @default("{}")
+  hardLimits String[] @default([])
+  updatedAt  DateTime @updatedAt
+}
+
+model PersonaFact {
+  id         String     @id @default(cuid())
+  key        String     @unique
+  value      String
+  shareable  Boolean    @default(false)
+  confidence Float      @default(1)
+  source     FactSource @default(QUESTIONNAIRE)
+  createdAt  DateTime   @default(now())
+}
+
+model ContactProfile {
+  id             String  @id @default(cuid())
+  contactId      String  @unique
+  contact        Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  observedTone   String?
+  observedRhythm String?
+  topics         String[] @default([])
+  proposedParams Json     @default("{}")
+  updatedAt      DateTime @updatedAt
+}
+
+model Decision {
+  id        String  @id @default(cuid())
+  messageId String  @unique
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  risks              RiskCategory[]
+  ruleFired          String
+  outcome            DecisionOutcome
+  classifierProvider String?
+  composerProvider   String?
+  latencyMs          Int?
+  costUsd            Float?
+  rawClassification  Json?
+  createdAt          DateTime        @default(now())
+
+  escalation Escalation?
+
+  @@index([contactId, createdAt])
+}
+
+model Escalation {
+  id                  String           @id @default(cuid())
+  decisionId          String           @unique
+  decision            Decision         @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  status              EscalationStatus @default(OPEN)
+  controlMessageWaId  String?
+  proposedText        String?
+  resolution          String?
+  resolvedText        String?
+  resolvedAt          DateTime?
+  expiresAt           DateTime
+  createdAt           DateTime         @default(now())
+
+  @@index([status, expiresAt])
+}
+
+model ProviderConfig {
+  id              String       @id @default(cuid())
+  name            String       @unique
+  kind            ProviderKind
+  apiKeyEncrypted String?
+  baseUrl         String?
+  enabled         Boolean      @default(true)
+  healthyAt       DateTime?
+  lastError       String?
+  createdAt       DateTime     @default(now())
+}
+
+model ProviderRoute {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  isDefault Boolean @default(false)
+  entries   Json    @default("{}")
+}
+
+model SystemState {
+  id           String  @id @default("singleton")
+  globalPaused Boolean @default(false)
+}
+
+model User {
+  id               String      @id
+  name             String
+  email            String
+  emailVerified    Boolean     @default(false)
+  image            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  twoFactorEnabled Boolean?    @default(false)
+  sessions         Session[]
+  accounts         Account[]
+  twofactors       TwoFactor[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model TwoFactor {
+  id                      String    @id
+  secret                  String
+  backupCodes             String
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime?
+
+  @@index([secret])
+  @@index([userId])
+  @@map("twoFactor")
+}

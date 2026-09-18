@@ -7,6 +7,15 @@ const ensureDevice = vi.fn();
 const fetchQrImage = vi.fn();
 const loginWithCode = vi.fn();
 
+// Journal de test : capture les lignes émises par `log` au lieu d'espionner
+// console.error, à la fois pour vérifier ce qui est journalisé et pour garder
+// une sortie de test vierge (le journal réel écrit sur process.stdout).
+const lignesJournal: string[] = [];
+vi.mock("@/lib/log", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/log")>();
+  return { ...original, log: original.creerJournal({}, (ligne) => lignesJournal.push(ligne)) };
+});
+
 // L'environnement est simulé uniquement parce que @/lib/auth (importé réellement
 // ci-dessous) instancie Better Auth et Prisma au chargement du module, ce qui
 // exige un getEnv() valide. Seul auth.api.getSession est simulé : requireSession
@@ -57,6 +66,7 @@ describe("routes WhatsApp", () => {
     ensureDevice.mockReset();
     fetchQrImage.mockReset();
     ensureDevice.mockResolvedValue("d1");
+    lignesJournal.length = 0;
   });
 
   it("refuse le statut sans session", async () => {
@@ -105,14 +115,12 @@ describe("routes WhatsApp", () => {
   it("répond 502 et journalise l'erreur réelle quand GOWA est injoignable", async () => {
     getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
     getStatus.mockRejectedValue(new Error("GOWA injoignable"));
-    const espionConsole = vi.spyOn(console, "error").mockImplementation(() => {});
     const { GET } = await import("@/app/api/whatsapp/status/route");
     const reponse = await GET(requete());
     expect(reponse.status).toBe(502);
-    expect(espionConsole).toHaveBeenCalled();
-    const messageJournalise = espionConsole.mock.calls[0].join(" ");
+    expect(lignesJournal.length).toBeGreaterThan(0);
+    const messageJournalise = lignesJournal[0];
     expect(messageJournalise).toContain("GOWA injoignable");
-    espionConsole.mockRestore();
   });
 
   describe("appairage par numéro (/api/whatsapp/pair-code)", () => {
@@ -155,7 +163,6 @@ describe("routes WhatsApp", () => {
     it("distingue un numéro invalide (400) d'une panne GOWA (502)", async () => {
       getSession.mockResolvedValue({ user: { id: "u1", email: "moi@example.com" } });
       ensureDevice.mockResolvedValue("d1");
-      const espion = vi.spyOn(console, "error").mockImplementation(() => {});
 
       loginWithCode.mockRejectedValueOnce(new Error("Numéro invalide : indique-le au format international, sans le signe plus"));
       const { POST } = await import("@/app/api/whatsapp/pair-code/route");
@@ -163,8 +170,6 @@ describe("routes WhatsApp", () => {
 
       loginWithCode.mockRejectedValueOnce(new Error("GOWA injoignable"));
       expect((await POST(requetePost({ telephone: "225010203040" }))).status).toBe(502);
-
-      espion.mockRestore();
     });
   });
 

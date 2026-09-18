@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { getEnv } from "@/config/env";
+import { log } from "@/lib/log";
 import {
   devicesListSchema,
   deviceCreateSchema,
@@ -108,9 +109,7 @@ export class GowaClient {
         .map((probleme) => `${probleme.path.join(".") || "(racine)"} : ${probleme.message}`)
         .join(" | ");
       const apercu = JSON.stringify(brut).slice(0, 600);
-      console.error(
-        `Réponse GOWA hors schéma sur ${chemin} — écarts : ${details} — corps reçu : ${apercu}`,
-      );
+      log.error("Réponse GOWA hors schéma", { chemin, ecarts: details, corps: apercu });
       throw new GowaError(`Réponse GOWA inattendue sur ${chemin} (${details})`);
     }
     return resultat.data;

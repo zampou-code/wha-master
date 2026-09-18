@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { createGowaClient } from "@/gowa/client";
+import { log } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ code });
   } catch (erreur) {
     const message = erreur instanceof Error ? erreur.message : String(erreur);
-    console.error("Échec de l'appairage par numéro :", message);
+    log.error("Échec de l'appairage par numéro", { chemin: "/api/whatsapp/pair-code", message });
     // Un numéro mal formé est une erreur de saisie, pas une panne : on la
     // distingue pour que l'opérateur sache quoi corriger.
     if (message.includes("Numéro invalide")) {

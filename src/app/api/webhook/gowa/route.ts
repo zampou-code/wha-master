@@ -3,6 +3,7 @@ import { getEnv } from "@/config/env";
 import { verifierSignature } from "@/ingest/signature";
 import { webhookSchema } from "@/ingest/payload";
 import { ingererMessage } from "@/ingest/handler";
+import { log } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -33,13 +34,13 @@ export async function POST(request: Request) {
       // anomalie réelle (P2) : GOWA a changé de format, ou notre schéma est
       // faux. Le signaler et refuser plutôt que d'avaler silencieusement des
       // messages — voir docs/deploiement.md section 10.3.
-      console.error("Payload de message invalide", analyse.error.issues);
+      log.error("Payload de message invalide", { issues: analyse.error.issues, chemin: "/api/webhook/gowa" });
       return NextResponse.json({ erreur: "Payload invalide" }, { status: 400 });
     }
 
     // Les événements non gérés (présence, accusés) sont acquittés sans traitement :
     // répondre en erreur déclencherait cinq tentatives inutiles côté GOWA.
-    console.debug("Événement webhook non géré, acquitté sans traitement", evenementBrut);
+    log.debug("Événement webhook non géré, acquitté sans traitement", { evenement: evenementBrut });
     return NextResponse.json({ statut: "ignore" });
   }
 
@@ -49,7 +50,10 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(resultat);
   } catch (erreur) {
-    console.error("Échec de l'ingestion", erreur);
+    log.error("Échec de l'ingestion", {
+      chemin: "/api/webhook/gowa",
+      erreur: erreur instanceof Error ? erreur : String(erreur),
+    });
     // P2 : on signale l'échec plutôt que de l'avaler. GOWA réessaiera.
     return NextResponse.json({ erreur: "Ingestion impossible" }, { status: 500 });
   }

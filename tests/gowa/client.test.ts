@@ -1,6 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { GowaClient, GowaError } from "@/gowa/client";
 
+// Le journal réel écrit sur process.stdout ; on le rend silencieux ici pour
+// garder une sortie de test vierge (ce fichier ne teste pas la journalisation
+// elle-même, voir tests/lib/log.test.ts).
+vi.mock("@/lib/log", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/log")>();
+  return { ...original, log: original.creerJournal({}, () => {}) };
+});
+
 function clientAvec(fetchImpl: typeof fetch): GowaClient {
   return new GowaClient({
     baseUrl: "http://gowa:3000",

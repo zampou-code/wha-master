@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { seedAdmin } from "@/scripts/seed-admin";
+
+// Le journal réel écrit sur process.stdout ; on le rend silencieux ici pour
+// garder une sortie de test vierge (ce fichier ne teste pas la journalisation
+// elle-même, voir tests/lib/log.test.ts).
+vi.mock("@/lib/log", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/log")>();
+  return { ...original, log: original.creerJournal({}, () => {}) };
+});
 
 describe("création du compte unique", () => {
   beforeEach(async () => {

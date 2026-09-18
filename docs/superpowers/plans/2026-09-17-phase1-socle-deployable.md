@@ -1274,11 +1274,15 @@ export async function seedAdmin(): Promise<void> {
 
   const ctx = await auth.$context;
   const hash = await ctx.password.hash(env.ADMIN_PASSWORD);
-  const utilisateur = await ctx.internalAdapter.createUser({
-    email: env.ADMIN_EMAIL,
-    name: "Propriétaire",
-    emailVerified: true,
-  });
+  // Ruling R10 : better-auth 1.7.5 exige un second argument `source`.
+  const utilisateur = await ctx.internalAdapter.createUser(
+    {
+      email: env.ADMIN_EMAIL,
+      name: "Propriétaire",
+      emailVerified: true,
+    },
+    { method: "email-password" },
+  );
   await ctx.internalAdapter.createAccount({
     userId: utilisateur.id,
     providerId: "credential",

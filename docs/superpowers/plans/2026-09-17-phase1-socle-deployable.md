@@ -2388,9 +2388,15 @@ Relancer un déploiement depuis Dokploy, puis rouvrir `/connexion`.
 
 Expected: la page affiche toujours « Appareil appairé », sans nouveau QR. La session reste ouverte dans le navigateur. Si un QR réapparaît, le volume `gowa-session` n'est pas monté correctement.
 
-- [ ] **Step 8 : Vérifier la forme réelle de la durée du QR**
+- [ ] **Step 8 : Vérifier la durée du QR et l'enveloppe des réponses d'envoi**
 
 Dans les journaux du service `app`, relever la valeur brute de `duration` renvoyée par `/app/login`. Si elle est exprimée en nanosecondes, corriger `getLoginQr()` dans `src/gowa/client.ts` (diviser par 1e9) et adapter le test correspondant de Task 6.
+
+Relever également (ruling R14) la forme réelle des réponses de `POST /send/message` et
+`POST /send/chat-presence`. `sendSchema` et `presenceSchema` exigent la présence d'une clé
+`results` ; si GOWA ne l'inclut pas sur ces endpoints, un appel pourtant réussi lèverait une
+`GowaError`. Rendre `results` optionnel dans ces deux schémas le cas échéant. Ces méthodes ne
+sont appelées par aucun code avant la phase 3, mais la vérification coûte une requête ici.
 
 - [ ] **Step 9 : Configurer les sauvegardes**
 

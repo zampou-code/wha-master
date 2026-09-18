@@ -86,7 +86,7 @@ describe("GowaClient", () => {
       const fetchMock = vi.fn().mockImplementation((url: string, init: RequestInit) => {
         if (init.method === "POST") {
           return Promise.resolve(
-            reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: { device_id: "nouveau" } }),
+            reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: { id: "nouveau", display_name: "", jid: "", state: "disconnected", created_at: "2026-09-18T14:00:00Z" } }),
           );
         }
         return Promise.resolve(
@@ -105,7 +105,7 @@ describe("GowaClient", () => {
           throw new Error("createDevice n'aurait pas dû être appelé");
         }
         return Promise.resolve(
-          reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: [{ device_id: "existant" }] }),
+          reponseJson({ status: 200, code: "SUCCESS", message: "ok", results: [{ id: "existant", state: "connected", jid: "225@s.whatsapp.net", created_at: "2026-09-18T10:00:00Z" }] }),
         );
       });
       const idAppareil = await clientAvec(fetchMock as unknown as typeof fetch).ensureDevice();

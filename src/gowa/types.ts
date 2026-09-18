@@ -34,8 +34,12 @@ export const sendSchema = enveloppe(
 
 export const presenceSchema = enveloppe(z.unknown());
 
+// Asymétrie de l'API GOWA v9, vérifiée dans src/domains/device/device.go :
+// les endpoints /devices renvoient l'identifiant sous la clé `id`, alors que
+// le CORPS de création l'accepte sous `device_id`, et que /app/status et
+// /app/login le renvoient sous `device_id`. Ne pas uniformiser.
 export const deviceSchema = z.looseObject({
-  device_id: z.string(),
+  id: z.string(),
 });
 
 export const devicesListSchema = enveloppe(z.array(deviceSchema));

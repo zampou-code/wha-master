@@ -126,7 +126,7 @@ export class GowaClient {
 
   async listDevices(): Promise<string[]> {
     const { results } = await this.appeler("/devices", devicesListSchema);
-    return results.map((appareil) => appareil.device_id);
+    return results.map((appareil) => appareil.id);
   }
 
   async createDevice(params: EnsureDeviceParams = {}): Promise<string> {
@@ -139,7 +139,7 @@ export class GowaClient {
       method: "POST",
       body: corps,
     });
-    return results.device_id;
+    return results.id;
   }
 
   async ensureDevice(params: EnsureDeviceParams = {}): Promise<string> {

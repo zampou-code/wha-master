@@ -100,7 +100,17 @@ export class GowaClient {
 
     const resultat = schema.safeParse(brut);
     if (!resultat.success) {
-      throw new GowaError(`Réponse GOWA inattendue sur ${chemin}`);
+      // Une réponse hors schéma est presque toujours un écart de contrat entre
+      // notre client et la version de GOWA déployée. Sans le corps réel et les
+      // chemins fautifs, le diagnostic se fait à l'aveugle : on les journalise.
+      const details = resultat.error.issues
+        .map((probleme) => `${probleme.path.join(".") || "(racine)"} : ${probleme.message}`)
+        .join(" | ");
+      const apercu = JSON.stringify(brut).slice(0, 600);
+      console.error(
+        `Réponse GOWA hors schéma sur ${chemin} — écarts : ${details} — corps reçu : ${apercu}`,
+      );
+      throw new GowaError(`Réponse GOWA inattendue sur ${chemin} (${details})`);
     }
     return resultat.data;
   }

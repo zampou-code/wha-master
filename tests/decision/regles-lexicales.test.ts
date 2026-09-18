@@ -25,7 +25,7 @@ describe("règles lexicales", () => {
   });
 
   it("repère l'argent", () => {
-    expect(categories("tu peux m'envoyer 10000 ?")).toContain(RiskCategory.MONEY);
+    expect(categories("tu peux m'envoyer 10000 F ?")).toContain(RiskCategory.MONEY);
     expect(categories("j'ai besoin d'un prêt")).toContain(RiskCategory.MONEY);
   });
 
@@ -55,5 +55,50 @@ describe("règles lexicales", () => {
   it("est insensible à la casse et aux accents manquants", () => {
     expect(categories("TU ES DISPO DEMAIN")).toContain(RiskCategory.ENGAGEMENT);
     expect(categories("je t aime")).toContain(RiskCategory.EMOTIONAL);
+  });
+
+  it("repère les formes féminines de l'émotionnel", () => {
+    expect(categories("je suis déçue")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu m'as blessée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu m'as vexée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis déprimée")).toContain(RiskCategory.EMOTIONAL);
+  });
+
+  it("ne confond pas prêt (adjectif) avec prêt (loan)", () => {
+    expect(categories("tu es prêt ?")).toEqual([]);
+    expect(categories("je suis prête dans 5 min")).toEqual([]);
+    expect(categories("c'est presque prêt")).toEqual([]);
+    expect(categories("tu peux me faire un prêt ?")).toContain(RiskCategory.MONEY);
+  });
+
+  it("ne classe pas l'échange de numéro en demande d'argent", () => {
+    expect(categories("envoie-moi ton numéro 0778123456")).toEqual([]);
+    expect(categories("donne moi ton numero")).toEqual([]);
+    expect(categories("tu peux m'envoyer 10000 F ?")).toContain(RiskCategory.MONEY);
+  });
+
+  it("distingue tu fais quoi (plan) de tu travailles (fait)", () => {
+    expect(categories("tu fais quoi ce soir ?")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("tu fais quoi demain ?")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("tu fais quoi ce week-end ?")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("tu fais quoi ?")).toEqual([]);
+    expect(categories("tu travailles où ?")).toContain(RiskCategory.FACT);
+    expect(categories("tu bosses dans quoi ?")).toContain(RiskCategory.FACT);
+  });
+
+  it("accepte les messages ordinaires du quotidien", () => {
+    const messagesOrdinaires = [
+      "salut ça va ?",
+      "lol c'est dingue",
+      "t'as vu le film hier soir ?",
+      "envoie-moi ton numéro",
+      "tu es prêt ?",
+      "je suis occupée là",
+      "à plus tard",
+      "tu fais quoi ?",
+    ];
+    for (const msg of messagesOrdinaires) {
+      expect(categories(msg)).toEqual([], `Message "${msg}" ne doit déclencher aucun signal`);
+    }
   });
 });

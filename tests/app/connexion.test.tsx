@@ -25,11 +25,27 @@ function reponseJson(corps: unknown, status = 200): Response {
   });
 }
 
+// La route QR ne renvoie plus de JSON : elle relaie les octets de l'image et
+// annonce la durée de validité en en-tête. Le simulacre doit refléter ce
+// contrat, sinon les tests passent sans exercer ce que fait vraiment la page.
+function reponseImageQr(dureeSec = 30): Response {
+  return new Response(new Uint8Array([137, 80, 78, 71]), {
+    status: 200,
+    headers: { "Content-Type": "image/png", "X-QR-Duration": String(dureeSec) },
+  });
+}
+
 describe("page d'appairage WhatsApp (/connexion)", () => {
   beforeEach(() => {
     push.mockReset();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    // jsdom n'implémente pas les URL d'objet ; sans ces stubs, la page lèverait
+    // au moment d'afficher l'image et l'échec se manifesterait en rejet non géré.
+    vi.stubGlobal("URL", Object.assign(globalThis.URL, {
+      createObjectURL: vi.fn(() => "blob:qr"),
+      revokeObjectURL: vi.fn(),
+    }));
   });
 
   afterEach(() => {
@@ -49,7 +65,7 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
         return Promise.resolve(reponseJson({ isConnected: true, isLoggedIn: false }));
       }
       if (url.includes("/api/whatsapp/qr")) {
-        return Promise.resolve(reponseJson({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" }));
+        return Promise.resolve(reponseImageQr(30));
       }
       throw new Error(`URL inattendue: ${url}`);
     });
@@ -114,12 +130,13 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
     expect(screen.queryByText("Impossible d'obtenir le QR code.")).toBeNull();
   });
 
-  it("redemande un nouveau QR après expiration (durationSec écoulé)", async () => {
-    // Un code d'appairage vit ~20-30s. Sans minuteur de rafraîchissement, un
-    // opérateur qui revient après ce délai scanne un code mort sans indice —
-    // revue de branche, point 4. Ce test prouve qu'un second appel /qr part
-    // automatiquement une fois durationSec écoulé, sans qu'aucune action de
-    // l'opérateur ne soit nécessaire.
+  it("signale l'expiration sans redemander automatiquement un QR", async () => {
+    // Régression vécue en production : la régénération automatique du QR
+    // consommait une tentative d'association WhatsApp toutes les ~30 s, ce qui
+    // a déclenché la limitation anti-abus (« Impossible de connecter de
+    // nouveaux appareils pour le moment ») et a maintenu le compte bloqué.
+    // L'expiration doit donc s'afficher et s'arrêter là : la régénération est
+    // un geste explicite de l'opérateur, qui est devant l'écran.
     vi.useFakeTimers();
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
@@ -127,7 +144,7 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
         return Promise.resolve(reponseJson({ isConnected: true, isLoggedIn: false }));
       }
       if (url.includes("/api/whatsapp/qr")) {
-        return Promise.resolve(reponseJson({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" }));
+        return Promise.resolve(reponseImageQr(30));
       }
       throw new Error(`URL inattendue: ${url}`);
     });
@@ -135,23 +152,19 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
     const { default: Appairage } = await import("@/app/connexion/page");
     render(<Appairage />);
 
-    // Comme dans le test de sondage ci-dessus : laisser le montage initial (et
-    // un premier cycle de sondage) se dérouler avant de mesurer quoi que ce
-    // soit, le temps que les effets React et la chaîne de promesses simulées
-    // se propagent complètement.
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(3000);
 
-    const appelsQrAvant = fetchMock.mock.calls.filter(([input]) => String(input).includes("/api/whatsapp/qr"));
-    expect(appelsQrAvant).toHaveLength(1);
+    const avant = fetchMock.mock.calls.filter(([input]) => String(input).includes("/api/whatsapp/qr"));
+    expect(avant).toHaveLength(1);
 
-    // Avance jusqu'à l'expiration du code (durationSec = 30s) avec une marge
-    // pour la propagation des effets, sans dépasser assez pour déclencher un
-    // deuxième cycle d'expiration (qui n'arriverait pas avant 60s).
-    await vi.advanceTimersByTimeAsync(30_000);
+    // Bien au-delà de l'expiration (30 s), pour prouver qu'aucune boucle ne
+    // repart : ni à l'expiration, ni aux cycles de sondage suivants.
+    await vi.advanceTimersByTimeAsync(90_000);
 
-    const appelsQrApres = fetchMock.mock.calls.filter(([input]) => String(input).includes("/api/whatsapp/qr"));
-    expect(appelsQrApres.length).toBeGreaterThanOrEqual(2);
+    const apres = fetchMock.mock.calls.filter(([input]) => String(input).includes("/api/whatsapp/qr"));
+    expect(apres).toHaveLength(1);
+    expect(screen.getByText(/Code expiré/)).toBeTruthy();
   });
 
   it("affiche un message réseau distinct (et ne redirige pas) quand /status est injoignable", async () => {
@@ -203,7 +216,7 @@ describe("page d'appairage WhatsApp (/connexion)", () => {
       if (url.includes("/api/whatsapp/qr")) {
         if (premierAppelQr) {
           premierAppelQr = false;
-          return Promise.resolve(reponseJson({ durationSec: 30, imageUrl: "/api/whatsapp/qr/image" }));
+          return Promise.resolve(reponseImageQr(30));
         }
         return Promise.reject(new TypeError("Failed to fetch"));
       }

@@ -93,8 +93,14 @@ export default function Appairage() {
     // un — voir la revue de branche, point 4.
     annulerMinuteurExpiration();
     minuteurExpirationRef.current = setTimeout(() => {
+      // On signale l'expiration sans régénérer automatiquement. Chaque appel à
+      // /app/login consomme une tentative d'association côté WhatsApp, qui
+      // applique une limitation anti-abus (« Impossible de connecter de
+      // nouveaux appareils pour le moment »). Une boucle de rafraîchissement
+      // automatique sur un point d'accès limité maintient le compte bloqué au
+      // lieu de l'en sortir. La régénération reste possible, d'un geste
+      // explicite : l'opérateur est devant l'écran, téléphone en main.
       setCodeExpire(true);
-      void demanderQr();
     }, dureeSec * 1000);
   }, [router, annulerMinuteurExpiration, remplacerImage]);
 
@@ -176,7 +182,7 @@ export default function Appairage() {
           <>
             <div className="cadre-qr">
               {codeExpire ? (
-                <p className="cadre-qr__message">Code expiré. Nouveau code en préparation.</p>
+                <p className="cadre-qr__message">Code expiré. Appuie sur Régénérer le code.</p>
               ) : sourceQr ? (
                 <img
                   src={sourceQr}

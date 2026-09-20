@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { createGowaClient } from "@/gowa/client";
+import { log } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +34,10 @@ export async function GET(request: Request) {
       },
     });
   } catch (erreur) {
-    console.error(
-      "Échec de récupération de l'image QR GOWA :",
-      erreur instanceof Error ? erreur.message : erreur,
-    );
+    log.error("Échec de récupération de l'image QR GOWA", {
+      chemin: "/api/whatsapp/qr/image",
+      erreur: erreur instanceof Error ? erreur : String(erreur),
+    });
     return NextResponse.json({ erreur: "Impossible d'obtenir le QR code" }, { status: 502 });
   }
 }

@@ -1,0 +1,286 @@
+import { describe, it, expect } from "vitest";
+import {
+  evaluerReglesLexicales,
+  RADICAUX_FLECHIS,
+  RADICAUX_VERBES,
+  formesFlechies,
+  formesVerbe,
+} from "@/decision/regles-lexicales";
+import { MediaType, RiskCategory } from "@/generated/prisma/client";
+
+function categories(texte: string | null, media: MediaType | null = null): RiskCategory[] {
+  return evaluerReglesLexicales(texte, media).map((signal) => signal.categorie);
+}
+
+describe("règles lexicales", () => {
+  it("repère un engagement dans une proposition de rendez-vous", () => {
+    expect(categories("on se voit vendredi ?")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("tu es dispo demain soir")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("je passe te prendre à 19h")).toContain(RiskCategory.ENGAGEMENT);
+  });
+
+  it("repère une question factuelle sur l'utilisateur", () => {
+    expect(categories("tu travailles où déjà ?")).toContain(RiskCategory.FACT);
+    expect(categories("t'as quel âge")).toContain(RiskCategory.FACT);
+  });
+
+  it("repère l'émotionnel et le statut de la relation", () => {
+    expect(categories("on est quoi tous les deux ?")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je t'aime")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu me manques")).toContain(RiskCategory.EMOTIONAL);
+  });
+
+  it("repère l'argent", () => {
+    expect(categories("tu peux m'envoyer 10000 F ?")).toContain(RiskCategory.MONEY);
+    expect(categories("j'ai besoin d'un prêt")).toContain(RiskCategory.MONEY);
+  });
+
+  it("repère une demande de photo", () => {
+    expect(categories("envoie une photo de toi")).toContain(RiskCategory.INTIMATE);
+  });
+
+  it("classe tout message non textuel en NON_TEXT, quel que soit le texte", () => {
+    expect(categories(null, MediaType.AUDIO)).toContain(RiskCategory.NON_TEXT);
+    expect(categories("regarde", MediaType.IMAGE)).toContain(RiskCategory.NON_TEXT);
+  });
+
+  it("classe un message sans texte ni média en LOW_CONFIDENCE", () => {
+    expect(categories(null, null)).toContain(RiskCategory.LOW_CONFIDENCE);
+  });
+
+  it("ne déclenche rien sur un échange anodin", () => {
+    expect(categories("haha t'es fou")).toEqual([]);
+    expect(categories("bonne nuit")).toEqual([]);
+  });
+
+  it("nomme la règle déclenchée, pour que le journal soit exploitable", () => {
+    const signaux = evaluerReglesLexicales("on se voit vendredi ?", null);
+    expect(signaux[0].regle).toMatch(/engagement/);
+  });
+
+  it("est insensible à la casse et aux accents manquants", () => {
+    expect(categories("TU ES DISPO DEMAIN")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("je t aime")).toContain(RiskCategory.EMOTIONAL);
+  });
+
+  it("repère les formes féminines de l'émotionnel", () => {
+    expect(categories("je suis déçue")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu m'as blessée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu m'as vexée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis déprimée")).toContain(RiskCategory.EMOTIONAL);
+  });
+
+  it("ne confond pas prêt (adjectif) avec prêt (loan)", () => {
+    expect(categories("tu es prêt ?")).toEqual([]);
+    expect(categories("je suis prête dans 5 min")).toEqual([]);
+    expect(categories("c'est presque prêt")).toEqual([]);
+    expect(categories("tu peux me faire un prêt ?")).toContain(RiskCategory.MONEY);
+  });
+
+  it("ne classe pas l'échange de numéro en demande d'argent", () => {
+    expect(categories("envoie-moi ton numéro 0778123456")).toEqual([]);
+    expect(categories("donne moi ton numero")).toEqual([]);
+    expect(categories("tu peux m'envoyer 10000 F ?")).toContain(RiskCategory.MONEY);
+  });
+
+  it("distingue tu fais quoi (plan) de tu travailles (fait)", () => {
+    expect(categories("tu fais quoi ce soir ?")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("tu fais quoi demain ?")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("tu fais quoi ce week-end ?")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("tu fais quoi ?")).toEqual([]);
+    expect(categories("tu travailles où ?")).toContain(RiskCategory.FACT);
+    expect(categories("tu bosses dans quoi ?")).toContain(RiskCategory.FACT);
+  });
+
+  it("accepte les messages ordinaires du quotidien", () => {
+    const messagesOrdinaires = [
+      "salut ça va ?",
+      "lol c'est dingue",
+      "t'as vu le film hier soir ?",
+      "envoie-moi ton numéro",
+      "tu es prêt ?",
+      "je suis occupée là",
+      "à plus tard",
+      "tu fais quoi ?",
+    ];
+    for (const msg of messagesOrdinaires) {
+      expect(categories(msg), `Message "${msg}" ne doit déclencher aucun signal`).toEqual([]);
+    }
+  });
+
+  it("accepte les formes grammaticales correctes en tous genres pour les adjectifs relationnels", () => {
+    // Marié/mariée - past participle of "marier" (to marry)
+    expect(categories("tu es marié ?")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariée ?")).toContain(RiskCategory.FACT);
+
+    // Exclusif/exclusive - relationship status adjective
+    expect(categories("tu veux être exclusif avec moi ?")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu veux être exclusive avec moi ?")).toContain(RiskCategory.EMOTIONAL);
+  });
+
+  it("détecte un montant nu (sans unité de devise) mais pas un numéro de téléphone", () => {
+    // Finding 4 : la revue a exécuté ces quatre cas et vérifié le résultat.
+    expect(categories("envoie-moi ton numéro 0778123456")).toEqual([]);
+    expect(categories("envoie moi 50000")).toContain(RiskCategory.MONEY);
+    expect(categories("prête moi 20000")).toContain(RiskCategory.MONEY);
+    expect(categories("tu peux me donner 10000")).toContain(RiskCategory.MONEY);
+  });
+
+  it("accepte les formes annulée et décalée en plus des formes au masculin", () => {
+    expect(categories("c'est annulé")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("c'est annulée")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("c'est décalé")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("c'est décalée")).toContain(RiskCategory.ENGAGEMENT);
+  });
+
+  it("capture prêt avec déterminants possessifs et articles", () => {
+    // Possessives
+    expect(categories("mon prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("ton prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("son prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("notre prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("votre prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("leur prêt")).toContain(RiskCategory.MONEY);
+
+    // Possessive plurals
+    expect(categories("mes prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("tes prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("ses prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("nos prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("vos prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("leurs prêts")).toContain(RiskCategory.MONEY);
+
+    // Articles
+    expect(categories("le prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("un prêt")).toContain(RiskCategory.MONEY);
+
+    // But "tu es prêt" must still be empty
+    expect(categories("tu es prêt")).toEqual([]);
+    expect(categories("tu es prête")).toEqual([]);
+  });
+
+  it("capture rembourser et ses variantes", () => {
+    expect(categories("je dois rembourser")).toContain(RiskCategory.MONEY);
+    expect(categories("je rembourse")).toContain(RiskCategory.MONEY);
+    expect(categories("remboursé")).toContain(RiskCategory.MONEY);
+  });
+
+  it("capture nu/nue aux singulier et pluriel", () => {
+    expect(categories("photo nue")).toContain(RiskCategory.INTIMATE);
+    expect(categories("photos nues")).toContain(RiskCategory.INTIMATE);
+    expect(categories("je suis nu")).toContain(RiskCategory.INTIMATE);
+    expect(categories("je suis nue")).toContain(RiskCategory.INTIMATE);
+    expect(categories("elles sont nues")).toContain(RiskCategory.INTIMATE);
+    expect(categories("ils sont nus")).toContain(RiskCategory.INTIMATE);
+  });
+
+  it("teste toutes les formes fléchies pour chaque mot affecté", () => {
+    // annulé (annul + e/ee + optionnel s)
+    expect(categories("rendez-vous annulé")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("rendez-vous annulée")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("rendez-vous annulés")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("rendez-vous annulées")).toContain(RiskCategory.ENGAGEMENT);
+
+    // décalé (decal + e/ee + optionnel s)
+    expect(categories("réunion décalée")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("réunions décalées")).toContain(RiskCategory.ENGAGEMENT);
+
+    // marié (mari + e/ee + optionnel s)
+    expect(categories("tu es marié")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariée")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariés")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariées")).toContain(RiskCategory.FACT);
+
+    // déçu (decu + e/ee + optionnel s)
+    expect(categories("je suis déçu")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis déçue")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("on est déçus")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("on est déçues")).toContain(RiskCategory.EMOTIONAL);
+
+    // blessé (blesse + e/ee + optionnel s)
+    expect(categories("tu m'as blessé")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu m'as blessée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("vous m'avez blessés")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("vous m'avez blessées")).toContain(RiskCategory.EMOTIONAL);
+
+    // vexé (vexe + e/ee + optionnel s)
+    expect(categories("je suis vexé")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis vexée")).toContain(RiskCategory.EMOTIONAL);
+
+    // déprimé (deprime + e/ee + optionnel s)
+    expect(categories("je suis déprimé")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis déprimée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("elles sont déprimées")).toContain(RiskCategory.EMOTIONAL);
+
+    // crédit/crédits
+    expect(categories("j'ai des crédits")).toContain(RiskCategory.MONEY);
+    expect(categories("j'ai un crédit")).toContain(RiskCategory.MONEY);
+
+    // dette/dettes
+    expect(categories("j'ai une dette")).toContain(RiskCategory.MONEY);
+    expect(categories("j'ai des dettes")).toContain(RiskCategory.MONEY);
+
+    // remboursé (rembours + e/ee + optionnel s)
+    expect(categories("je suis remboursé")).toContain(RiskCategory.MONEY);
+    expect(categories("je suis remboursée")).toContain(RiskCategory.MONEY);
+    expect(categories("ils sont remboursés")).toContain(RiskCategory.MONEY);
+    expect(categories("elles sont remboursées")).toContain(RiskCategory.MONEY);
+
+    // rembourser (infinitive)
+    expect(categories("je dois rembourser")).toContain(RiskCategory.MONEY);
+
+    // virement/virements
+    expect(categories("fais moi un virement")).toContain(RiskCategory.MONEY);
+    expect(categories("fais moi des virements")).toContain(RiskCategory.MONEY);
+  });
+
+  it("j'annulerai demain / je te rembourserai lundi déclenchent au futur simple", () => {
+    // Finding 1 : vérifié par exécution avant correctif, ces deux phrases ne
+    // déclenchaient rien — le modèle de suffixes e/ee/s ne couvre pas les
+    // conjugaisons.
+    expect(categories("j'annulerai demain")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("je te rembourserai lundi")).toContain(RiskCategory.MONEY);
+  });
+
+  describe("dérivation des flexions déclarées (finding 1)", () => {
+    // Ce bloc ne teste aucune forme écrite à la main : il itère sur les
+    // radicaux déclarés dans regles-lexicales.ts et sur les formes que le
+    // même code générateur (formesFlechies / formesVerbe, partagé avec la
+    // construction des motifs de production) produit pour chacun. Un radical
+    // ajouté à la table, ou une régression dans l'assistant qui l'exploite,
+    // fait échouer ce test sans qu'on ait à penser à énumérer une nouvelle
+    // forme.
+    it.each(RADICAUX_FLECHIS)(
+      "chaque forme fléchie du radical « $radical » déclenche $categorie",
+      ({ radical, categorie, dansContexte }) => {
+        const formes = formesFlechies(radical);
+        expect(formes.length).toBeGreaterThan(0);
+        for (const forme of formes) {
+          const texte = dansContexte ? dansContexte(forme) : forme;
+          const categoriesTrouvees = categories(texte);
+          expect(
+            categoriesTrouvees,
+            `la forme "${forme}" (radical "${radical}", texte "${texte}") devrait déclencher ${categorie}`,
+          ).toContain(categorie);
+        }
+      },
+    );
+
+    it.each(RADICAUX_VERBES)(
+      "chaque forme conjuguée (accord, infinitif, futur, imparfait) du radical « $radical » déclenche $categorie",
+      ({ radical, categorie, dansContexte }) => {
+        const formes = formesVerbe(radical);
+        // 6 formes d'accord + infinitif + 6 futur + 5 imparfait.
+        expect(formes.length).toBe(18);
+        for (const forme of formes) {
+          const texte = dansContexte ? dansContexte(forme) : forme;
+          const categoriesTrouvees = categories(texte);
+          expect(
+            categoriesTrouvees,
+            `la forme "${forme}" (radical "${radical}", texte "${texte}") devrait déclencher ${categorie}`,
+          ).toContain(categorie);
+        }
+      },
+    );
+  });
+});

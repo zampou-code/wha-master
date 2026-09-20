@@ -14,5 +14,11 @@ export default function setup() {
   process.env.GOWA_BASIC_AUTH ??= "admin:test";
   process.env.GOWA_WEBHOOK_SECRET ??= "c".repeat(16);
 
-  execSync("pnpm prisma migrate deploy", { stdio: "inherit", env: { ...process.env, DATABASE_URL: url } });
+  execSync("pnpm prisma migrate deploy", {
+    stdio: "inherit",
+    // Sans cette variable, `prisma migrate deploy` imprime un bandeau
+    // « Update available » sur stdout : la contrainte de sortie vierge des
+    // tests d'intégration est inconditionnelle (finding 7).
+    env: { ...process.env, DATABASE_URL: url, PRISMA_HIDE_UPDATE_MESSAGE: "1" },
+  });
 }

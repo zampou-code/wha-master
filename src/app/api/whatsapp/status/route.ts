@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { createGowaClient } from "@/gowa/client";
+import { log } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,10 @@ export async function GET(request: Request) {
   } catch (erreur) {
     // L'absence de journalisation ici a déjà coûté une heure de diagnostic :
     // sans elle, un 502 est muet et ne dit rien de la cause réelle côté GOWA.
-    console.error("Échec de récupération du statut GOWA :", erreur instanceof Error ? erreur.message : erreur);
+    log.error("Échec de récupération du statut GOWA", {
+      chemin: "/api/whatsapp/status",
+      erreur: erreur instanceof Error ? erreur : String(erreur),
+    });
     return NextResponse.json({ erreur: "WhatsApp injoignable" }, { status: 502 });
   }
 }

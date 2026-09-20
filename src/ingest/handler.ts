@@ -1,6 +1,9 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { log } from "@/lib/log";
+import { deciderEtTracer } from "./decision";
 import { detecterTypeMedia, type WebhookMessage } from "./payload";
+import type { classifier } from "@/decision/classifieur";
 
 export type IngestResult = {
   statut: "persiste" | "doublon" | "groupe_de_controle" | "ignore";
@@ -18,7 +21,10 @@ function estViolationUnicite(erreur: unknown): boolean {
 
 export async function ingererMessage(
   evenement: WebhookMessage,
-  options: { controlGroupJid?: string },
+  // `classifierImpl` n'existe que pour l'injection en test : elle traverse
+  // jusqu'à `deciderEtTracer` sans changer le comportement par défaut
+  // (le vrai classifieur reste utilisé en production).
+  options: { controlGroupJid?: string; classifierImpl?: typeof classifier },
 ): Promise<IngestResult> {
   if (evenement.event !== "message") {
     return { statut: "ignore" };
@@ -30,8 +36,36 @@ export async function ingererMessage(
     return { statut: "groupe_de_controle" };
   }
 
-  const existant = await prisma.message.findUnique({ where: { waMessageId: payload.id } });
+  const existant = await prisma.message.findUnique({
+    where: { waMessageId: payload.id },
+    include: { thread: true, decision: true },
+  });
   if (existant) {
+    // R18 : réparation par relecture plutôt que par transaction. GOWA rejoue
+    // un webhook en échec jusqu'à 5 fois avec un backoff exponentiel ; si une
+    // panne transitoire a empêché la Decision d'un précédent passage (message
+    // persisté mais deciderEtTracer tombé), ce rejeu est l'occasion naturelle
+    // de la produire — sans quoi le message reste indécis pour toujours (P5).
+    // Les messages sortants ne sont jamais décidés, ici comme ailleurs.
+    if (!payload.is_from_me && !existant.decision) {
+      try {
+        await deciderEtTracer({
+          messageId: existant.id,
+          contactId: existant.thread.contactId,
+          texte: existant.text,
+          typeMedia: existant.mediaType,
+          classifierImpl: options.classifierImpl,
+        });
+      } catch (erreur) {
+        // Même discipline que plus bas : un échec de réparation ne doit
+        // jamais transformer un doublon en 500, sous peine de faire rejouer
+        // à GOWA un message pourtant déjà persisté en toute sécurité.
+        log.error("Réparation de la décision impossible pour un doublon", {
+          messageId: existant.id,
+          erreur: erreur instanceof Error ? erreur.message : String(erreur),
+        });
+      }
+    }
     return { statut: "doublon", messageId: existant.id };
   }
 
@@ -113,10 +147,48 @@ export async function ingererMessage(
     return { statut: "doublon", messageId: messageConcurrent.id };
   }
 
+  // Finding 2 : capturer la valeur AVANT l'écrasement. `deciderEtTracer`
+  // calcule la dormance de la conversation à partir de cette date ; si on la
+  // lit après la mise à jour ci-dessous, elle vaut toujours l'horodatage du
+  // message qu'on est en train de décider, donc l'écart est toujours nul et
+  // gate3.conversation-dormante ne peut jamais se déclencher.
+  const dernierEchangeAvant = fil.lastMessageAt;
+
   await prisma.thread.update({
     where: { id: fil.id },
     data: { lastMessageAt: horodatage },
   });
+
+  // Seuls les messages entrants sont décidés : un message que l'utilisateur a
+  // écrit lui-même depuis son téléphone n'a pas à être classé.
+  if (payload.is_from_me) {
+    return { statut: "persiste", messageId: message.id };
+  }
+
+  // Finding 3 (R18) : le message est déjà persisté ci-dessus, donc un échec
+  // de décision sur ce chemin principal doit remonter comme un échec
+  // d'ingestion (P2) plutôt que d'être avalé. GOWA rejouera ce webhook sans
+  // dupliquer le message (waMessageId est déjà pris) ; le rejeu retombera
+  // dans la branche « doublon » plus haut, dont la réparation est idempotente
+  // et, elle, ne doit jamais transformer un doublon déjà persisté en 500 —
+  // c'est la seule branche où avaler l'erreur reste correct.
+  try {
+    await deciderEtTracer({
+      messageId: message.id,
+      contactId: contact.id,
+      texte: payload.body ?? null,
+      typeMedia: typeMedia,
+      dernierEchangeAvant,
+      classifierImpl: options.classifierImpl,
+    });
+  } catch (erreur) {
+    log.error("Décision impossible pour un message pourtant persisté", {
+      messageId: message.id,
+      contactId: contact.id,
+      erreur: erreur instanceof Error ? erreur.message : String(erreur),
+    });
+    throw erreur;
+  }
 
   return { statut: "persiste", messageId: message.id };
 }

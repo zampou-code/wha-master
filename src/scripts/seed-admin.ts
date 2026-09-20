@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getEnv } from "@/config/env";
+import { log } from "@/lib/log";
 
 export async function seedAdmin(): Promise<void> {
   const env = getEnv();
@@ -10,7 +11,7 @@ export async function seedAdmin(): Promise<void> {
   if (existant) {
     const compteCredential = await ctx.internalAdapter.findCredentialAccount(existant.id);
     if (compteCredential) {
-      console.log(`Compte ${env.ADMIN_EMAIL} déjà présent, rien à faire.`);
+      log.info("Compte déjà présent, rien à faire", { email: env.ADMIN_EMAIL });
       return;
     }
 
@@ -24,9 +25,7 @@ export async function seedAdmin(): Promise<void> {
       accountId: existant.id,
       password: hashReparation,
     });
-    console.log(
-      `Compte ${env.ADMIN_EMAIL} incomplet (identifiants manquants) : réparé.`,
-    );
+    log.info("Compte incomplet (identifiants manquants) : réparé", { email: env.ADMIN_EMAIL });
     return;
   }
 
@@ -52,14 +51,16 @@ export async function seedAdmin(): Promise<void> {
     accountId: utilisateur.id,
     password: hash,
   });
-  console.log(`Compte ${env.ADMIN_EMAIL} créé.`);
+  log.info("Compte créé", { email: env.ADMIN_EMAIL });
 }
 
 if (process.argv[1]?.endsWith("seed-admin.ts")) {
   seedAdmin()
     .then(() => process.exit(0))
     .catch((erreur) => {
-      console.error(erreur);
+      log.error("Échec du seed du compte administrateur", {
+        erreur: erreur instanceof Error ? erreur : String(erreur),
+      });
       process.exit(1);
     });
 }

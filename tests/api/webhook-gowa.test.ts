@@ -14,6 +14,16 @@ vi.mock("@/config/env", () => ({
 }));
 vi.mock("@/ingest/handler", () => ({ ingererMessage }));
 
+// Journal de test : capture les lignes émises par `log` au lieu d'espionner
+// console.error/console.debug, à la fois pour vérifier ce qui est journalisé
+// et pour garder une sortie de test vierge (le journal réel écrit sur
+// process.stdout).
+const lignesJournal: string[] = [];
+vi.mock("@/lib/log", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/log")>();
+  return { ...original, log: original.creerJournal({}, (ligne) => lignesJournal.push(ligne)) };
+});
+
 function signer(corps: string): string {
   return `sha256=${createHmac("sha256", SECRET).update(corps).digest("hex")}`;
 }
@@ -45,6 +55,7 @@ const evenementMessage = {
 describe("POST /api/webhook/gowa", () => {
   beforeEach(() => {
     ingererMessage.mockReset();
+    lignesJournal.length = 0;
   });
 
   it("événement message correctement signé : 200 et le message persisté", async () => {
@@ -84,7 +95,6 @@ describe("POST /api/webhook/gowa", () => {
     // erreur ici déclencherait cinq tentatives inutiles pour chaque mise à jour de
     // présence ou accusé de lecture. Il doit néanmoins être tracé (P5), au niveau
     // debug pour ne pas polluer les journaux à chaque accusé de lecture.
-    const debugSilencieux = vi.spyOn(console, "debug").mockImplementation(() => {});
     const corps = JSON.stringify({
       event: "presence",
       device_id: "225xxxxx@s.whatsapp.net",
@@ -95,8 +105,8 @@ describe("POST /api/webhook/gowa", () => {
     expect(reponse.status).toBe(200);
     await expect(reponse.json()).resolves.toEqual({ statut: "ignore" });
     expect(ingererMessage).not.toHaveBeenCalled();
-    expect(debugSilencieux).toHaveBeenCalledTimes(1);
-    debugSilencieux.mockRestore();
+    const lignesDebug = lignesJournal.filter((ligne) => JSON.parse(ligne).niveau === "debug");
+    expect(lignesDebug).toHaveLength(1);
   });
 
   it("événement message qui ne respecte pas le schéma (ex. timestamp numérique) : 400, erreurs Zod journalisées", async () => {
@@ -104,7 +114,6 @@ describe("POST /api/webhook/gowa", () => {
     // Si GOWA envoie un timestamp numérique ou renomme un champ, ceci ne doit
     // jamais retomber dans le cas "ignore" silencieux (P2) : c'est un vrai
     // événement message, juste malformé.
-    const erreurSilencieuse = vi.spyOn(console, "error").mockImplementation(() => {});
     const corps = JSON.stringify({
       event: "message",
       device_id: "225xxxxx@s.whatsapp.net",
@@ -123,19 +132,17 @@ describe("POST /api/webhook/gowa", () => {
     expect(reponse.status).toBe(400);
     await expect(reponse.json()).resolves.toEqual({ erreur: "Payload invalide" });
     expect(ingererMessage).not.toHaveBeenCalled();
-    expect(erreurSilencieuse).toHaveBeenCalledTimes(1);
-    expect(erreurSilencieuse.mock.calls[0][0]).toBe("Payload de message invalide");
-    erreurSilencieuse.mockRestore();
+    const lignesErreur = lignesJournal.filter((ligne) => JSON.parse(ligne).niveau === "error");
+    expect(lignesErreur).toHaveLength(1);
+    expect(JSON.parse(lignesErreur[0]).message).toBe("Payload de message invalide");
   });
 
   it("échec réel de l'ingestion : 500 (P2, GOWA doit réessayer)", async () => {
-    const erreurSilencieuse = vi.spyOn(console, "error").mockImplementation(() => {});
     ingererMessage.mockRejectedValue(new Error("Base de données injoignable"));
     const corps = JSON.stringify(evenementMessage);
     const { POST } = await import("@/app/api/webhook/gowa/route");
     const reponse = await POST(requete(corps, signer(corps)));
     expect(reponse.status).toBe(500);
     await expect(reponse.json()).resolves.toEqual({ erreur: "Ingestion impossible" });
-    erreurSilencieuse.mockRestore();
   });
 });

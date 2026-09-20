@@ -45,7 +45,12 @@ export async function assemblerContexte(contactId: string): Promise<ContexteReda
   const messages = contact.thread
     ? await prisma.message.findMany({
         where: { threadId: contact.thread.id },
-        orderBy: { timestamp: "desc" },
+        // `id` départage les égalités d'horodatage : WhatsApp peut livrer
+        // plusieurs messages à la même seconde, et sans deuxième clé l'ordre
+        // entre eux n'est garanti par aucune norme SQL — il dépend du plan
+        // d'exécution. Sans ce départage, un IN et un OUT peuvent s'inverser
+        // et le rédacteur lit la conversation à contretemps.
+        orderBy: [{ timestamp: "desc" }, { id: "desc" }],
         take: NOMBRE_DE_MESSAGES,
         select: { direction: true, text: true },
       })

@@ -15,7 +15,11 @@ async function preparer() {
     ],
   });
   const contact = await prisma.contact.create({
-    data: { jid: "225@s.whatsapp.net", thread: { create: { rollingSummary: "on se taquine" } }, policy: { create: {} } },
+    data: {
+      jid: "225@s.whatsapp.net",
+      thread: { create: { rollingSummary: "on se taquine" } },
+      policy: { create: { styleLanguage: "en" } },
+    },
     include: { thread: true },
   });
   for (let i = 0; i < 25; i++) {
@@ -69,7 +73,10 @@ describe("contexte du rédacteur", () => {
   it("reprend les paramètres de style du contact", async () => {
     const contact = await preparer();
     const contexte = await assemblerContexte(contact.id);
-    expect(contexte.stylePolitique.langue).toBe("fr");
+    // La valeur diverge du défaut du schéma ("fr") : un test qui se contentait
+    // de vérifier le défaut passerait même si assemblerContexte ne lisait
+    // jamais la policy en base.
+    expect(contexte.stylePolitique.langue).toBe("en");
   });
 
   it("fonctionne sur une persona vide sans lever", async () => {

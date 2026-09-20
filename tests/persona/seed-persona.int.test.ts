@@ -33,7 +33,10 @@ describe("amorçage de la persona", () => {
     await chargerPersona(personaSchema.parse(donnees));
     await chargerPersona(personaSchema.parse({
       ...donnees,
-      faits: [{ key: "prenom", value: "Ibra", shareable: true }],
+      faits: [
+        { key: "prenom", value: "Ibra", shareable: true },
+        { key: "adresse", value: "secrète", shareable: false },
+      ],
     }));
     const faits = await prisma.personaFact.findMany();
     expect(faits).toHaveLength(2);
@@ -43,5 +46,27 @@ describe("amorçage de la persona", () => {
   it("refuse un fait sans clé, avec un message en français", () => {
     expect(() => personaSchema.parse({ ...donnees, faits: [{ value: "x", shareable: true }] }))
       .toThrow(/clé/i);
+  });
+
+  it("un fait retiré du fichier est supprimé", async () => {
+    await chargerPersona(personaSchema.parse(donnees));
+    expect(await prisma.personaFact.count()).toBe(2);
+    await chargerPersona(personaSchema.parse({
+      ...donnees,
+      faits: [{ key: "prenom", value: "Ibrahim", shareable: true }],
+    }));
+    const faits = await prisma.personaFact.findMany();
+    expect(faits).toHaveLength(1);
+    expect(faits[0]?.key).toBe("prenom");
+  });
+
+  it("charger une fiche sans aucun fait vide la table", async () => {
+    await chargerPersona(personaSchema.parse(donnees));
+    expect(await prisma.personaFact.count()).toBe(2);
+    await chargerPersona(personaSchema.parse({
+      ...donnees,
+      faits: [],
+    }));
+    expect(await prisma.personaFact.count()).toBe(0);
   });
 });

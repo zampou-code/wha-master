@@ -10,6 +10,15 @@ const TOUJOURS_ACTIFS: ReadonlySet<RiskCategory> = new Set([
   RiskCategory.NON_TEXT,
 ]);
 
+// Catégories pour lesquelles un drapeau de garde-fou existe dans GardeFous.
+// INTIMATE est traité à part ci-dessous (dérogation adulte) et LOW_CONFIDENCE
+// / NON_TEXT n'ont pas de drapeau (TOUJOURS_ACTIFS). Le `satisfies` sur la
+// table `drapeaux` force sa couverture à correspondre exactement à ce type :
+// une neuvième catégorie ajoutée au schéma Prisma sans être ni exclue ici ni
+// ajoutée à la table fait échouer la compilation, au lieu de tomber
+// silencieusement sur le repli `true` (finding 8).
+type CategorieAvecDrapeau = Exclude<RiskCategory, "INTIMATE" | "LOW_CONFIDENCE" | "NON_TEXT">;
+
 function gardeFouActif(categorie: RiskCategory, contexte: ContexteDecision): boolean {
   if (TOUJOURS_ACTIFS.has(categorie)) return true;
 
@@ -21,15 +30,15 @@ function gardeFouActif(categorie: RiskCategory, contexte: ContexteDecision): boo
     return contexte.gardeFous.intimate;
   }
 
-  const drapeaux: Partial<Record<RiskCategory, keyof GardeFous>> = {
+  const drapeaux = {
     [RiskCategory.ENGAGEMENT]: "engagement",
     [RiskCategory.FACT]: "facts",
     [RiskCategory.EMOTIONAL]: "emotional",
     [RiskCategory.MONEY]: "money",
     [RiskCategory.THIRD_PARTY]: "thirdParty",
-  };
+  } satisfies Record<CategorieAvecDrapeau, keyof GardeFous>;
 
-  const drapeau = drapeaux[categorie];
+  const drapeau = (drapeaux as Partial<Record<RiskCategory, keyof GardeFous>>)[categorie];
   return drapeau ? contexte.gardeFous[drapeau] : true;
 }
 

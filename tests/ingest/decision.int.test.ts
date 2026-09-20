@@ -59,9 +59,6 @@ describe("décision et traçage", () => {
 
   it("persiste une Decision liée au message, avec la règle déclenchée", async () => {
     const { contact, message } = await contactAvecMessage(ContactMode.DRAFT);
-    // Note : la règle lexicale « argent.demande » exige une unité monétaire
-    // accolée au nombre (voir tests/decision/regles-lexicales.test.ts) ; un
-    // montant nu comme « 50000 ? » ne déclenche rien.
     await deciderEtTracer({
       messageId: message.id, contactId: contact.id, texte: "tu peux m'envoyer 50000 F ?",
       typeMedia: null, classifierImpl: classifieurCalme,
@@ -120,6 +117,29 @@ describe("décision et traçage", () => {
     const decision = await prisma.decision.findUnique({ where: { messageId: message.id } });
     expect(decision!.classifierProvider).toBe("test");
     expect(decision!.latencyMs).toBe(5);
+  });
+
+  it("enregistre le coût du classifieur dans la Decision quand il est disponible (finding 6)", async () => {
+    const { contact, message } = await contactAvecMessage(ContactMode.DRAFT);
+    const classifieurAvecCout = vi.fn().mockResolvedValue({
+      signaux: [], confiance: 0.95, motif: "anodin", fournisseur: "test", latencyMs: 5, costUsd: 0.0032,
+    });
+    await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "haha t'es fou",
+      typeMedia: null, classifierImpl: classifieurAvecCout,
+    });
+    const decision = await prisma.decision.findUnique({ where: { messageId: message.id } });
+    expect(decision!.costUsd).toBe(0.0032);
+  });
+
+  it("n'écrit pas de coût quand le court-circuit du Gate 0 empêche tout appel au classifieur (P1)", async () => {
+    const { contact, message } = await contactAvecMessage(ContactMode.OFF);
+    await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "on se voit vendredi ?",
+      typeMedia: null, classifierImpl: classifieurCalme,
+    });
+    const decision = await prisma.decision.findUnique({ where: { messageId: message.id } });
+    expect(decision!.costUsd).toBeNull();
   });
 
   it("ne modifie jamais le mode du contact (P1)", async () => {

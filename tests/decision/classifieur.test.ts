@@ -63,6 +63,20 @@ describe("classifieur de risque", () => {
     expect(resultat.signaux.map((s) => s.categorie)).toEqual([RiskCategory.ENGAGEMENT]);
   });
 
+  it("remonte le coût du fournisseur quand il est disponible (finding 6)", async () => {
+    const appeler = commeAppeler(
+      vi.fn().mockResolvedValue({
+        valeur: { risks: [], confidence: 0.9, rationale: "anodin" },
+        fournisseur: "a",
+        model: "m",
+        latencyMs: 10,
+        costUsd: 0.0021,
+      }),
+    );
+    const resultat = await classifier({ texte: "x", appeler });
+    expect(resultat.costUsd).toBe(0.0021);
+  });
+
   it("renvoie LOW_CONFIDENCE quand aucun fournisseur ne répond (P2 fail-closed)", async () => {
     const appeler = commeAppeler(vi.fn().mockRejectedValue(new AucunFournisseurError("classify", 4)));
     const resultat = await classifier({ texte: "on se voit vendredi ?", appeler });

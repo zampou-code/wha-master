@@ -42,6 +42,7 @@ export type ResultatClassification = {
   motif: string;
   fournisseur: string | null;
   latencyMs: number | null;
+  costUsd: number | null;
 };
 
 function replierEnIncertitude(motif: string): ResultatClassification {
@@ -51,6 +52,7 @@ function replierEnIncertitude(motif: string): ResultatClassification {
     motif,
     fournisseur: null,
     latencyMs: null,
+    costUsd: null,
   };
 }
 
@@ -85,6 +87,7 @@ export async function classifier(params: {
       motif: resultat.valeur.rationale,
       fournisseur: resultat.fournisseur,
       latencyMs: resultat.latencyMs,
+      costUsd: resultat.costUsd,
     };
   } catch (erreur) {
     // P2 : un classifieur indisponible ne fait pas échouer la décision, il la

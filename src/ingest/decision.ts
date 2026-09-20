@@ -14,6 +14,14 @@ export async function deciderEtTracer(params: {
   texte: string | null;
   typeMedia: MediaType | null;
   classifierImpl?: typeof classifier;
+  // Finding 2 : l'horodatage du dernier échange AVANT le message en cours de
+  // décision. L'appelant (src/ingest/handler.ts) le capture avant d'écraser
+  // `thread.lastMessageAt` avec l'horodatage de ce même message — sans quoi
+  // cette fonction ne verrait plus que l'horodatage du message qu'elle est en
+  // train de décider, et la dormance ne pourrait jamais se déclencher.
+  // Quand omis (ex. réparation R18 d'un doublon), on retombe sur la valeur
+  // actuellement en base.
+  dernierEchangeAvant?: Date | null;
 }): Promise<Verdict> {
   const classifierUtilise = params.classifierImpl ?? classifier;
 
@@ -40,6 +48,13 @@ export async function deciderEtTracer(params: {
 
   const signauxLexicaux = evaluerReglesLexicales(params.texte, params.typeMedia);
 
+  // Finding 8 : le court-circuit garantit qu'on n'appelle le classifieur que
+  // pour un texte non vide, mais un booléen agrégé ne le dit pas au typage.
+  // `texteExploitable` rétrécit `params.texte` une fois pour toutes ; on
+  // vérifie sa nullité au point d'usage plutôt que d'affirmer `params.texte!`.
+  const texteExploitable =
+    params.texte !== null && params.texte.trim() !== "" ? params.texte : null;
+
   // Gate 0 avant toute dépense : un contact non activé ne déclenche aucun appel
   // à un fournisseur (P1). Idem pour un média, que le classifieur ne sait pas
   // lire et qui escalade de toute façon.
@@ -47,22 +62,23 @@ export async function deciderEtTracer(params: {
     contact.mode === ContactMode.OFF ||
     pauseGlobale ||
     params.typeMedia !== null ||
-    params.texte === null ||
-    params.texte.trim() === "";
+    texteExploitable === null;
 
   let signauxClassifieur: SignalRisque[] = [];
   let fournisseur: string | null = null;
   let latencyMs: number | null = null;
   let motif: string | null = null;
   let classifieurDisponible = true;
+  let coutUsd: number | null = null;
 
-  if (!courtCircuit) {
-    const resultat = await classifierUtilise({ texte: params.texte!, contactId: contact.id });
+  if (!courtCircuit && texteExploitable !== null) {
+    const resultat = await classifierUtilise({ texte: texteExploitable, contactId: contact.id });
     signauxClassifieur = resultat.signaux;
     fournisseur = resultat.fournisseur;
     latencyMs = resultat.latencyMs;
     motif = resultat.motif;
     classifieurDisponible = resultat.fournisseur !== null;
+    coutUsd = resultat.costUsd;
   }
 
   // P3 : concaténation, jamais intersection. Un classifieur complaisant ne peut
@@ -74,7 +90,8 @@ export async function deciderEtTracer(params: {
       where: { status: "OPEN", decision: { contactId: contact.id } },
     })) > 0;
 
-  const dernierEchange = contact.thread?.lastMessageAt ?? null;
+  const dernierEchange =
+    params.dernierEchangeAvant !== undefined ? params.dernierEchangeAvant : (contact.thread?.lastMessageAt ?? null);
   const dernierEchangeIlYaJours = dernierEchange
     ? Math.floor((Date.now() - dernierEchange.getTime()) / JOUR_MS)
     : null;
@@ -106,6 +123,7 @@ export async function deciderEtTracer(params: {
       outcome: verdict.issue,
       classifierProvider: fournisseur,
       latencyMs,
+      costUsd: coutUsd,
       rawClassification: motif ? { motif } : undefined,
     },
   });

@@ -2,7 +2,15 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { ingererMessage } from "@/ingest/handler";
 import { resetDb } from "../helpers/db";
-import { MediaType } from "@/generated/prisma/client";
+import { DecisionOutcome, MediaType } from "@/generated/prisma/client";
+import type { ResultatClassification } from "@/decision/classifieur";
+
+// Classifieur injecté : ne doit jamais atteindre un vrai fournisseur IA dans
+// les tests. Renvoie systématiquement « rien à signaler », pour isoler les
+// gates testées ici (dormance, réparation) des signaux du classifieur.
+async function classifieurCalme(): Promise<ResultatClassification> {
+  return { signaux: [], confiance: 0.95, motif: "anodin", fournisseur: "test", latencyMs: 1, costUsd: null };
+}
 
 function evenement(surcharge: Record<string, unknown> = {}) {
   return {
@@ -116,6 +124,55 @@ describe("ingestion d'un message", () => {
     const rejeu = await ingererMessage(evenement({ id: "MSG-E" }), {});
     expect(rejeu.statut).toBe("doublon");
     const decision = await prisma.decision.findUnique({ where: { messageId } });
+    expect(decision).not.toBeNull();
+  });
+
+  it("escalade pour conversation dormante quand le dernier échange date de plus de sept jours (finding 2)", async () => {
+    // lastMessageAt est fixé bien avant la fenêtre de sept jours, quelle que
+    // soit la date réelle d'exécution du test.
+    await prisma.contact.create({
+      data: {
+        jid: "22500000001@s.whatsapp.net",
+        mode: "DRAFT",
+        thread: { create: { lastMessageAt: new Date("2000-01-01T00:00:00Z") } },
+      },
+    });
+
+    // "coucou" (corps par défaut de `evenement`) ne déclenche aucune règle
+    // lexicale ; le classifieur injecté ne renvoie aucun signal non plus : le
+    // seul chemin vers une escalade est donc gate3.conversation-dormante.
+    await ingererMessage(evenement({ id: "MSG-DORM" }), { classifierImpl: classifieurCalme });
+
+    const message = await prisma.message.findUnique({ where: { waMessageId: "MSG-DORM" } });
+    const decision = await prisma.decision.findUnique({ where: { messageId: message!.id } });
+    expect(decision!.outcome).toBe(DecisionOutcome.ESCALATED);
+    expect(decision!.ruleFired).toBe("gate3.conversation-dormante");
+  });
+
+  it("un échec de décision sur le chemin principal remonte comme un échec d'ingestion, et le rejeu répare (finding 3, R18)", async () => {
+    await prisma.contact.create({
+      data: { jid: "22500000001@s.whatsapp.net", mode: "AUTO", thread: { create: {} } },
+    });
+    const classifieurEnPanne = async (): Promise<never> => {
+      throw new Error("panne simulée du classifieur");
+    };
+
+    // Chemin principal : le message est persisté, mais deciderEtTracer échoue
+    // (contact en mode AUTO avec du texte : le classifieur injecté est bien
+    // appelé). L'échec ne doit plus être avalé.
+    await expect(
+      ingererMessage(evenement({ id: "MSG-PANNE" }), { classifierImpl: classifieurEnPanne }),
+    ).rejects.toThrow("panne simulée du classifieur");
+
+    const message = await prisma.message.findUnique({ where: { waMessageId: "MSG-PANNE" } });
+    expect(message).not.toBeNull(); // persisté malgré l'échec de la décision
+    expect(await prisma.decision.count()).toBe(0);
+
+    // GOWA rejoue (même waMessageId) : retombe dans la branche « doublon »,
+    // dont la réparation est idempotente et renvoie 200 (ici : "doublon").
+    const rejeu = await ingererMessage(evenement({ id: "MSG-PANNE" }), {});
+    expect(rejeu.statut).toBe("doublon");
+    const decision = await prisma.decision.findUnique({ where: { messageId: message!.id } });
     expect(decision).not.toBeNull();
   });
 });

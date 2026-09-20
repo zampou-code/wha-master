@@ -81,6 +81,54 @@ describe("appel IA avec repli", () => {
     expect(resultat.model).toBe("m1");
   });
 
+  it("désactive les reprises internes du SDK et fournit un signal d'abandon (finding 5)", async () => {
+    const generer = vi.fn().mockResolvedValue({ object: { risks: [] }, usage: {} });
+    await appelerStructure({
+      role: "classify",
+      schema,
+      systeme: "s",
+      invite: "i",
+      entrees: [entree("a", "m1")],
+      generer,
+    });
+    expect(generer).toHaveBeenCalledTimes(1);
+    const appelParams = generer.mock.calls[0][0] as { maxRetries?: number; abortSignal?: AbortSignal };
+    // maxRetries: 0 — la cascade ci-dessus (TENTATIVES_PAR_ENTREE) gère déjà
+    // les reprises ; le défaut du SDK (2) triplerait sinon chaque requête.
+    expect(appelParams.maxRetries).toBe(0);
+    expect(appelParams.abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("remonte le coût quand le fournisseur le rapporte via providerMetadata (finding 6)", async () => {
+    const generer = vi.fn().mockResolvedValue({
+      object: { risks: [] },
+      usage: {},
+      providerMetadata: { openrouter: { usage: { cost: 0.00073 } } },
+    });
+    const resultat = await appelerStructure({
+      role: "classify",
+      schema,
+      systeme: "s",
+      invite: "i",
+      entrees: [entree("a", "m1")],
+      generer,
+    });
+    expect(resultat.costUsd).toBe(0.00073);
+  });
+
+  it("renvoie costUsd null quand le fournisseur ne le rapporte pas, sans que ce soit codé en dur (finding 6)", async () => {
+    const generer = vi.fn().mockResolvedValue({ object: { risks: [] }, usage: {} });
+    const resultat = await appelerStructure({
+      role: "classify",
+      schema,
+      systeme: "s",
+      invite: "i",
+      entrees: [entree("a", "m1")],
+      generer,
+    });
+    expect(resultat.costUsd).toBeNull();
+  });
+
   it("ne laisse jamais une clé d'API apparaître dans le message d'erreur", async () => {
     const avecCle: EntreeRoute = { ...entree("a", "m1"), apiKey: "sk-tres-secret" };
     const generer = vi.fn().mockRejectedValue(new Error("échec avec sk-tres-secret dans le message"));

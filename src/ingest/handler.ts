@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
 import { deciderEtTracer } from "./decision";
 import { detecterTypeMedia, type WebhookMessage } from "./payload";
+import type { classifier } from "@/decision/classifieur";
 
 export type IngestResult = {
   statut: "persiste" | "doublon" | "groupe_de_controle" | "ignore";
@@ -20,7 +21,10 @@ function estViolationUnicite(erreur: unknown): boolean {
 
 export async function ingererMessage(
   evenement: WebhookMessage,
-  options: { controlGroupJid?: string },
+  // `classifierImpl` n'existe que pour l'injection en test : elle traverse
+  // jusqu'à `deciderEtTracer` sans changer le comportement par défaut
+  // (le vrai classifieur reste utilisé en production).
+  options: { controlGroupJid?: string; classifierImpl?: typeof classifier },
 ): Promise<IngestResult> {
   if (evenement.event !== "message") {
     return { statut: "ignore" };
@@ -50,6 +54,7 @@ export async function ingererMessage(
           contactId: existant.thread.contactId,
           texte: existant.text,
           typeMedia: existant.mediaType,
+          classifierImpl: options.classifierImpl,
         });
       } catch (erreur) {
         // Même discipline que plus bas : un échec de réparation ne doit
@@ -142,6 +147,13 @@ export async function ingererMessage(
     return { statut: "doublon", messageId: messageConcurrent.id };
   }
 
+  // Finding 2 : capturer la valeur AVANT l'écrasement. `deciderEtTracer`
+  // calcule la dormance de la conversation à partir de cette date ; si on la
+  // lit après la mise à jour ci-dessous, elle vaut toujours l'horodatage du
+  // message qu'on est en train de décider, donc l'écart est toujours nul et
+  // gate3.conversation-dormante ne peut jamais se déclencher.
+  const dernierEchangeAvant = fil.lastMessageAt;
+
   await prisma.thread.update({
     where: { id: fil.id },
     data: { lastMessageAt: horodatage },
@@ -153,15 +165,21 @@ export async function ingererMessage(
     return { statut: "persiste", messageId: message.id };
   }
 
-  // La décision ne doit jamais faire échouer l'ingestion : un message persisté
-  // reste persisté même si le moteur tombe, et GOWA ne doit pas rejouer un
-  // webhook déjà traité. On trace l'échec et on rend la main.
+  // Finding 3 (R18) : le message est déjà persisté ci-dessus, donc un échec
+  // de décision sur ce chemin principal doit remonter comme un échec
+  // d'ingestion (P2) plutôt que d'être avalé. GOWA rejouera ce webhook sans
+  // dupliquer le message (waMessageId est déjà pris) ; le rejeu retombera
+  // dans la branche « doublon » plus haut, dont la réparation est idempotente
+  // et, elle, ne doit jamais transformer un doublon déjà persisté en 500 —
+  // c'est la seule branche où avaler l'erreur reste correct.
   try {
     await deciderEtTracer({
       messageId: message.id,
       contactId: contact.id,
       texte: payload.body ?? null,
       typeMedia: typeMedia,
+      dernierEchangeAvant,
+      classifierImpl: options.classifierImpl,
     });
   } catch (erreur) {
     log.error("Décision impossible pour un message pourtant persisté", {
@@ -169,6 +187,7 @@ export async function ingererMessage(
       contactId: contact.id,
       erreur: erreur instanceof Error ? erreur.message : String(erreur),
     });
+    throw erreur;
   }
 
   return { statut: "persiste", messageId: message.id };

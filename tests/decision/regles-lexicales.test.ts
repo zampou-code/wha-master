@@ -101,4 +101,62 @@ describe("règles lexicales", () => {
       expect(categories(msg)).toEqual([], `Message "${msg}" ne doit déclencher aucun signal`);
     }
   });
+
+  it("accepte les formes grammaticales correctes en tous genres pour les adjectifs relationnels", () => {
+    // Marié/mariée - past participle of "marier" (to marry)
+    expect(categories("tu es marié ?")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariée ?")).toContain(RiskCategory.FACT);
+
+    // Exclusif/exclusive - relationship status adjective
+    expect(categories("tu veux être exclusif avec moi ?")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu veux être exclusive avec moi ?")).toContain(RiskCategory.EMOTIONAL);
+  });
+
+  it("accepte les formes annulée et décalée en plus des formes au masculin", () => {
+    expect(categories("c'est annulé")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("c'est annulée")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("c'est décalé")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("c'est décalée")).toContain(RiskCategory.ENGAGEMENT);
+  });
+
+  it("capture prêt avec déterminants possessifs et articles", () => {
+    // Possessives
+    expect(categories("mon prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("ton prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("son prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("notre prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("votre prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("leur prêt")).toContain(RiskCategory.MONEY);
+
+    // Possessive plurals
+    expect(categories("mes prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("tes prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("ses prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("nos prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("vos prêts")).toContain(RiskCategory.MONEY);
+    expect(categories("leurs prêts")).toContain(RiskCategory.MONEY);
+
+    // Articles
+    expect(categories("le prêt")).toContain(RiskCategory.MONEY);
+    expect(categories("un prêt")).toContain(RiskCategory.MONEY);
+
+    // But "tu es prêt" must still be empty
+    expect(categories("tu es prêt")).toEqual([]);
+    expect(categories("tu es prête")).toEqual([]);
+  });
+
+  it("capture rembourser et ses variantes", () => {
+    expect(categories("je dois rembourser")).toContain(RiskCategory.MONEY);
+    expect(categories("je rembourse")).toContain(RiskCategory.MONEY);
+    expect(categories("remboursé")).toContain(RiskCategory.MONEY);
+  });
+
+  it("capture nu/nue aux singulier et pluriel", () => {
+    expect(categories("photo nue")).toContain(RiskCategory.INTIMATE);
+    expect(categories("photos nues")).toContain(RiskCategory.INTIMATE);
+    expect(categories("je suis nu")).toContain(RiskCategory.INTIMATE);
+    expect(categories("je suis nue")).toContain(RiskCategory.INTIMATE);
+    expect(categories("elles sont nues")).toContain(RiskCategory.INTIMATE);
+    expect(categories("ils sont nus")).toContain(RiskCategory.INTIMATE);
+  });
 });

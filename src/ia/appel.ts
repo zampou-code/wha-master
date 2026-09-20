@@ -3,7 +3,7 @@ import type { ProviderMetadata } from "ai";
 import type { z } from "zod";
 import { log } from "@/lib/log";
 import { modelePour } from "./fournisseurs";
-import type { EntreeRoute, RoleIA } from "./registre";
+import { resoudreRoute, type EntreeRoute, type RoleIA } from "./registre";
 
 export class AucunFournisseurError extends Error {
   constructor(role: RoleIA, tentatives: number) {
@@ -81,11 +81,7 @@ export async function appelerStructure<T>(params: {
   generer?: GenererObjet;
 }): Promise<ResultatIA<T>> {
   const generer = params.generer ?? generateObject;
-  // Import différé : ce module entraîne (via ./registre) l'initialisation de
-  // Prisma, qui exige une configuration d'environnement complète. On évite ce
-  // coût — et cette exigence — dès que l'appelant fournit déjà ses `entrees`
-  // (c'est le cas de tous les tests unitaires, qui tournent sans base).
-  const entrees = params.entrees ?? (await (await import("./registre")).resoudreRoute(params.role, { contactId: params.contactId }));
+  const entrees = params.entrees ?? (await resoudreRoute(params.role, { contactId: params.contactId }));
 
   if (entrees.length === 0) {
     throw new AucunFournisseurError(params.role, 0);

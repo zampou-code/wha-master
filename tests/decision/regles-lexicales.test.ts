@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { evaluerReglesLexicales } from "@/decision/regles-lexicales";
+import {
+  evaluerReglesLexicales,
+  RADICAUX_FLECHIS,
+  RADICAUX_VERBES,
+  formesFlechies,
+  formesVerbe,
+} from "@/decision/regles-lexicales";
 import { MediaType, RiskCategory } from "@/generated/prisma/client";
 
 function categories(texte: string | null, media: MediaType | null = null): RiskCategory[] {
@@ -112,6 +118,14 @@ describe("règles lexicales", () => {
     expect(categories("tu veux être exclusive avec moi ?")).toContain(RiskCategory.EMOTIONAL);
   });
 
+  it("détecte un montant nu (sans unité de devise) mais pas un numéro de téléphone", () => {
+    // Finding 4 : la revue a exécuté ces quatre cas et vérifié le résultat.
+    expect(categories("envoie-moi ton numéro 0778123456")).toEqual([]);
+    expect(categories("envoie moi 50000")).toContain(RiskCategory.MONEY);
+    expect(categories("prête moi 20000")).toContain(RiskCategory.MONEY);
+    expect(categories("tu peux me donner 10000")).toContain(RiskCategory.MONEY);
+  });
+
   it("accepte les formes annulée et décalée en plus des formes au masculin", () => {
     expect(categories("c'est annulé")).toContain(RiskCategory.ENGAGEMENT);
     expect(categories("c'est annulée")).toContain(RiskCategory.ENGAGEMENT);
@@ -218,5 +232,55 @@ describe("règles lexicales", () => {
     // virement/virements
     expect(categories("fais moi un virement")).toContain(RiskCategory.MONEY);
     expect(categories("fais moi des virements")).toContain(RiskCategory.MONEY);
+  });
+
+  it("j'annulerai demain / je te rembourserai lundi déclenchent au futur simple", () => {
+    // Finding 1 : vérifié par exécution avant correctif, ces deux phrases ne
+    // déclenchaient rien — le modèle de suffixes e/ee/s ne couvre pas les
+    // conjugaisons.
+    expect(categories("j'annulerai demain")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("je te rembourserai lundi")).toContain(RiskCategory.MONEY);
+  });
+
+  describe("dérivation des flexions déclarées (finding 1)", () => {
+    // Ce bloc ne teste aucune forme écrite à la main : il itère sur les
+    // radicaux déclarés dans regles-lexicales.ts et sur les formes que le
+    // même code générateur (formesFlechies / formesVerbe, partagé avec la
+    // construction des motifs de production) produit pour chacun. Un radical
+    // ajouté à la table, ou une régression dans l'assistant qui l'exploite,
+    // fait échouer ce test sans qu'on ait à penser à énumérer une nouvelle
+    // forme.
+    it.each(RADICAUX_FLECHIS)(
+      "chaque forme fléchie du radical « $radical » déclenche $categorie",
+      ({ radical, categorie, dansContexte }) => {
+        const formes = formesFlechies(radical);
+        expect(formes.length).toBeGreaterThan(0);
+        for (const forme of formes) {
+          const texte = dansContexte ? dansContexte(forme) : forme;
+          const categoriesTrouvees = categories(texte);
+          expect(
+            categoriesTrouvees,
+            `la forme "${forme}" (radical "${radical}", texte "${texte}") devrait déclencher ${categorie}`,
+          ).toContain(categorie);
+        }
+      },
+    );
+
+    it.each(RADICAUX_VERBES)(
+      "chaque forme conjuguée (accord, infinitif, futur, imparfait) du radical « $radical » déclenche $categorie",
+      ({ radical, categorie, dansContexte }) => {
+        const formes = formesVerbe(radical);
+        // 6 formes d'accord + infinitif + 6 futur + 5 imparfait.
+        expect(formes.length).toBe(18);
+        for (const forme of formes) {
+          const texte = dansContexte ? dansContexte(forme) : forme;
+          const categoriesTrouvees = categories(texte);
+          expect(
+            categoriesTrouvees,
+            `la forme "${forme}" (radical "${radical}", texte "${texte}") devrait déclencher ${categorie}`,
+          ).toContain(categorie);
+        }
+      },
+    );
   });
 });

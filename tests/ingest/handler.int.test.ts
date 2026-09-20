@@ -101,4 +101,21 @@ describe("ingestion d'un message", () => {
     });
     expect(contact?.mode).toBe("AUTO");
   });
+
+  it("répare une Decision manquante quand GOWA rejoue un webhook déjà traité (P5, R18)", async () => {
+    const premier = await ingererMessage(evenement({ id: "MSG-E" }), {});
+    expect(premier.statut).toBe("persiste");
+    const messageId = premier.messageId!;
+
+    // Simule une panne transitoire lors du premier passage : le message est
+    // persisté mais la Decision n'a jamais été écrite (deciderEtTracer était
+    // tombé après la persistance du message).
+    await prisma.decision.deleteMany({ where: { messageId } });
+    expect(await prisma.decision.count()).toBe(0);
+
+    const rejeu = await ingererMessage(evenement({ id: "MSG-E" }), {});
+    expect(rejeu.statut).toBe("doublon");
+    const decision = await prisma.decision.findUnique({ where: { messageId } });
+    expect(decision).not.toBeNull();
+  });
 });

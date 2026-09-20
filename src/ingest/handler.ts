@@ -32,8 +32,35 @@ export async function ingererMessage(
     return { statut: "groupe_de_controle" };
   }
 
-  const existant = await prisma.message.findUnique({ where: { waMessageId: payload.id } });
+  const existant = await prisma.message.findUnique({
+    where: { waMessageId: payload.id },
+    include: { thread: true, decision: true },
+  });
   if (existant) {
+    // R18 : réparation par relecture plutôt que par transaction. GOWA rejoue
+    // un webhook en échec jusqu'à 5 fois avec un backoff exponentiel ; si une
+    // panne transitoire a empêché la Decision d'un précédent passage (message
+    // persisté mais deciderEtTracer tombé), ce rejeu est l'occasion naturelle
+    // de la produire — sans quoi le message reste indécis pour toujours (P5).
+    // Les messages sortants ne sont jamais décidés, ici comme ailleurs.
+    if (!payload.is_from_me && !existant.decision) {
+      try {
+        await deciderEtTracer({
+          messageId: existant.id,
+          contactId: existant.thread.contactId,
+          texte: existant.text,
+          typeMedia: existant.mediaType,
+        });
+      } catch (erreur) {
+        // Même discipline que plus bas : un échec de réparation ne doit
+        // jamais transformer un doublon en 500, sous peine de faire rejouer
+        // à GOWA un message pourtant déjà persisté en toute sécurité.
+        log.error("Réparation de la décision impossible pour un doublon", {
+          messageId: existant.id,
+          erreur: erreur instanceof Error ? erreur.message : String(erreur),
+        });
+      }
+    }
     return { statut: "doublon", messageId: existant.id };
   }
 

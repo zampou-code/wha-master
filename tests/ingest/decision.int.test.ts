@@ -42,6 +42,21 @@ describe("décision et traçage", () => {
     expect(classifieurCalme).not.toHaveBeenCalled();
   });
 
+  it("n'appelle jamais le classifieur quand le système est en pause globale (P1)", async () => {
+    const { contact, message } = await contactAvecMessage(ContactMode.DRAFT);
+    await prisma.systemState.upsert({
+      where: { id: "singleton" },
+      create: { id: "singleton", globalPaused: true },
+      update: { globalPaused: true },
+    });
+    const verdict = await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "on se voit vendredi ?",
+      typeMedia: null, classifierImpl: classifieurCalme,
+    });
+    expect(verdict.issue).toBe(DecisionOutcome.IGNORED);
+    expect(classifieurCalme).not.toHaveBeenCalled();
+  });
+
   it("persiste une Decision liée au message, avec la règle déclenchée", async () => {
     const { contact, message } = await contactAvecMessage(ContactMode.DRAFT);
     // Note : la règle lexicale « argent.demande » exige une unité monétaire
@@ -82,6 +97,18 @@ describe("décision et traçage", () => {
     expect(verdict.issue).toBe(DecisionOutcome.ESCALATED);
     expect(verdict.risques).toContain(RiskCategory.NON_TEXT);
     expect(classifieurCalme).not.toHaveBeenCalled();
+  });
+
+  it("n'appelle jamais le classifieur pour un texte vide", async () => {
+    const { contact, message } = await contactAvecMessage(ContactMode.DRAFT);
+    const verdict = await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "",
+      typeMedia: null, classifierImpl: classifieurCalme,
+    });
+    expect(classifieurCalme).not.toHaveBeenCalled();
+    // Le contenu vide est lui-même un signal LOW_CONFIDENCE (garde-fou toujours
+    // actif) : l'issue est une escalade, pas un silence qui masquerait le cas.
+    expect(verdict.issue).toBe(DecisionOutcome.ESCALATED);
   });
 
   it("enregistre le fournisseur et la latence quand le classifieur a répondu", async () => {

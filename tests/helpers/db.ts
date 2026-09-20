@@ -6,7 +6,10 @@ export async function resetDb(): Promise<void> {
   // nettoyage, un test d'un autre fichier dont le contact n'est pas OFF (ex.
   // handler.int.test.ts) peut faire résoudre cette route par le classifieur
   // réel et atteindre un vrai fournisseur IA — interdit dans les tests.
+  // SystemState est inclus pour la même raison : un test qui pose
+  // globalPaused = true (Gate 0) ne doit pas laisser cet état fuiter vers les
+  // tests suivants, y compris ceux d'autres fichiers.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "Message", "Thread", "ContactPolicy", "ContactProfile", "Decision", "Escalation", "Contact", "ProviderRoute", "ProviderConfig" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "Message", "Thread", "ContactPolicy", "ContactProfile", "Decision", "Escalation", "Contact", "ProviderRoute", "ProviderConfig", "SystemState" RESTART IDENTITY CASCADE',
   );
 }

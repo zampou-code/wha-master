@@ -12,6 +12,7 @@
     "Ne jamais parler d'argent",
     "Ne jamais évoquer une autre personne par son nom"
   ],
+  "termesInterdits": ["rembourse", "virement", "mon adresse"],
   "faits": [
     { "key": "prenom", "value": "Ibrahim", "shareable": true },
     { "key": "ville", "value": "Abidjan", "shareable": true },

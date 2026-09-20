@@ -154,10 +154,11 @@ model Message {
 }
 
 model PersonaProfile {
-  id         String   @id @default("self")
-  styleGuide Json     @default("{}")
-  hardLimits String[] @default([])
-  updatedAt  DateTime @updatedAt
+  id              String   @id @default("self")
+  styleGuide      Json     @default("{}")
+  hardLimits      String[] @default([])
+  termesInterdits String[] @default([])
+  updatedAt       DateTime @updatedAt
 }
 
 model PersonaFact {

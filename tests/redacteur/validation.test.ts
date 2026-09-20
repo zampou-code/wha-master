@@ -6,6 +6,7 @@ function contexte(surcharge: Partial<ContexteRedaction> = {}): ContexteRedaction
   return {
     styleGuide: {},
     hardLimits: ["Ne jamais promettre une date"],
+    termesInterdits: [],
     faits: [
       { id: "f1", key: "prenom", value: "Ibrahim" },
       { id: "f2", key: "ville", value: "Abidjan" },
@@ -20,6 +21,14 @@ function contexte(surcharge: Partial<ContexteRedaction> = {}): ContexteRedaction
 describe("validation du brouillon", () => {
   it("accepte un brouillon n'utilisant que des faits connus", () => {
     const r = validerBrouillon({ reply: "Salut, je suis à Abidjan", factsUsed: ["f2"], needsFact: null }, contexte());
+    expect(r.valide).toBe(true);
+  });
+
+  it("accepte un factsUsed exprimé par la clé lisible du fait, pas seulement par son cuid", () => {
+    const ctx = contexte({
+      faits: [{ id: "cmg3x7k2p0000l8a1b2c3d4e5", key: "ville", value: "Abidjan" }],
+    });
+    const r = validerBrouillon({ reply: "Je suis à Abidjan", factsUsed: ["ville"], needsFact: null }, ctx);
     expect(r.valide).toBe(true);
   });
 
@@ -51,11 +60,58 @@ describe("validation du brouillon", () => {
     if (!r.valide) expect(r.regle).toBe("p4.longueur");
   });
 
-  it("refuse un brouillon heurtant une limite dure", () => {
+  it("refuse même quand la longueur du style est une clé du prototype d'objet (fail-closed)", () => {
+    const long = "mot ".repeat(200);
+    const r = validerBrouillon(
+      { reply: long, factsUsed: [], needsFact: null },
+      contexte({ stylePolitique: { longueur: "constructor", emoji: "parfois", formalite: "tutoiement", langue: "fr" } }),
+    );
+    expect(r.valide).toBe(false);
+    if (!r.valide) expect(r.regle).toBe("p4.longueur");
+  });
+
+  it("refuse un brouillon employant un terme interdit", () => {
     const r = validerBrouillon(
       { reply: "Promis, on se voit samedi", factsUsed: [], needsFact: null },
-      contexte({ hardLimits: ["samedi"] }),
+      contexte({ termesInterdits: ["samedi"] }),
     );
+    expect(r.valide).toBe(false);
+    if (!r.valide) expect(r.regle).toBe("p4.limite-dure");
+  });
+
+  it("une hardLimits en langue naturelle ne bloque rien mécaniquement, contrairement à termesInterdits (forme réelle du produit)", () => {
+    const brouillon = { reply: "Je te rembourse les 50 000 FCFA lundi", factsUsed: [], needsFact: null };
+
+    // hardLimits est une consigne de prompt : la comparaison littérale ne la
+    // trouve jamais dans un brouillon réel.
+    const sansGarde = validerBrouillon(brouillon, contexte({ hardLimits: ["Ne jamais parler d'argent"], termesInterdits: [] }));
+    expect(sansGarde.valide).toBe(true);
+
+    // termesInterdits est la garde mécanique : elle porte sur un mot concret.
+    const avecGarde = validerBrouillon(
+      brouillon,
+      contexte({ hardLimits: ["Ne jamais parler d'argent"], termesInterdits: ["rembourse"] }),
+    );
+    expect(avecGarde.valide).toBe(false);
+    if (!avecGarde.valide) expect(avecGarde.regle).toBe("p4.limite-dure");
+  });
+
+  it("ne déclenche pas de faux positif sur une sous-chaîne : « prêt » ne bloque pas « sous prétexte »", () => {
+    const r = validerBrouillon(
+      { reply: "Il a dit ça sous prétexte que j'étais en retard", factsUsed: [], needsFact: null },
+      contexte({ termesInterdits: ["prêt"] }),
+    );
+    expect(r.valide).toBe(true);
+  });
+
+  it.each([
+    ["accent : é précomposé dans le terme, décomposé dans le brouillon", ["café"], "on se voit au café du coin"],
+    ["casse : terme en majuscule, brouillon en minuscule", ["Rembourse"], "je te rembourse demain"],
+    ["apostrophe : terme droit, brouillon typographique (macOS)", ["l'argent"], "je n'ai pas l’argent en ce moment"],
+    ["apostrophe : terme typographique, brouillon droit", ["l’argent"], "je n'ai pas l'argent en ce moment"],
+    ["ligature : terme en œ, brouillon en oe", ["sœur"], "j'étais avec ma soeur hier"],
+  ])("normalise avant de comparer un terme interdit : %s", (_description, termesInterdits, reply) => {
+    const r = validerBrouillon({ reply, factsUsed: [], needsFact: null }, contexte({ termesInterdits }));
     expect(r.valide).toBe(false);
     if (!r.valide) expect(r.regle).toBe("p4.limite-dure");
   });

@@ -7,7 +7,11 @@ import { validerBrouillon } from "./validation";
 const sortieSchema = z.object({
   reply: z.string(),
   factsUsed: z.array(z.string()),
-  needsFact: z.string().nullable(),
+  // `nullish` plutôt que `nullable` : un modèle qui omet la clé plutôt que
+  // de la mettre à `null` ne doit pas faire échouer la validation de l'AI
+  // SDK et déclencher un repli « rédacteur indisponible » alors qu'il a
+  // répondu correctement. On normalise ensuite `undefined` en `null`.
+  needsFact: z.string().nullish(),
 });
 
 export type ResultatRedaction = {
@@ -20,8 +24,11 @@ export type ResultatRedaction = {
 };
 
 function construireSysteme(contexte: ContexteRedaction): string {
+  // `key` est le libellé lisible et unique du fait (ex. "ville") : c'est ce
+  // qu'un modèle qui rédige un message intime rend naturellement dans
+  // "factsUsed", jamais le cuid technique.
   const faits = contexte.faits.length
-    ? contexte.faits.map((f) => `- [${f.id}] ${f.key} : ${f.value}`).join("\n")
+    ? contexte.faits.map((f) => `- [${f.key}] ${f.value}`).join("\n")
     : "- (aucun fait renseigné)";
   const limites = contexte.hardLimits.length
     ? contexte.hardLimits.map((l) => `- ${l}`).join("\n")
@@ -87,7 +94,28 @@ export async function rediger(params: {
     };
   }
 
-  const validation = validerBrouillon(resultat.valeur, params.contexte);
+  // Ceinture et bretelles : l'AI SDK valide déjà `resultat.valeur` contre
+  // `sortieSchema` avant de nous le rendre. Mais cette garantie appartient à
+  // une dépendance tierce, non documentée ni testée ici, et repose elle-même
+  // sur un cast (`src/ia/appel.ts`). Si elle tombe un jour, `rediger` doit
+  // refuser plutôt que lever.
+  const analyse = sortieSchema.safeParse(resultat.valeur);
+  if (!analyse.success) {
+    log.error("Brouillon de forme inattendue", { erreur: analyse.error.message });
+    return {
+      brouillon: null,
+      motifRefus: "Le rédacteur a répondu quelque chose d'inexploitable. Je n'envoie rien.",
+      regleRefus: "redacteur.brouillon-illisible",
+      fournisseur: resultat.fournisseur,
+      latencyMs: resultat.latencyMs,
+      costUsd: resultat.costUsd,
+    };
+  }
+
+  const validation = validerBrouillon(
+    { reply: analyse.data.reply, factsUsed: analyse.data.factsUsed, needsFact: analyse.data.needsFact ?? null },
+    params.contexte,
+  );
   if (!validation.valide) {
     log.info("Brouillon refusé par la validation", { regle: validation.regle });
     return {

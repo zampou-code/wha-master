@@ -6,6 +6,7 @@ export type FaitPartageable = { id: string; key: string; value: string };
 export type ContexteRedaction = {
   styleGuide: Record<string, unknown>;
   hardLimits: string[];
+  termesInterdits: string[];
   faits: FaitPartageable[];
   resumeFil: string;
   derniersMessages: { direction: "IN" | "OUT"; texte: string }[];
@@ -59,6 +60,7 @@ export async function assemblerContexte(contactId: string): Promise<ContexteReda
   return {
     styleGuide: commeStyleGuide(profil?.styleGuide),
     hardLimits: profil?.hardLimits ?? [],
+    termesInterdits: profil?.termesInterdits ?? [],
     faits,
     resumeFil: contact.thread?.rollingSummary ?? "",
     derniersMessages: messages

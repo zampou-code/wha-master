@@ -6,6 +6,7 @@ import { log } from "@/lib/log";
 export const personaSchema = z.object({
   styleGuide: z.record(z.string(), z.json()),
   hardLimits: z.array(z.string()),
+  termesInterdits: z.array(z.string()).default([]),
   faits: z.array(
     z.object({
       key: z.string("chaque fait doit porter une clé non vide").min(1, "chaque fait doit porter une clé non vide"),
@@ -20,8 +21,17 @@ export type DonneesPersona = z.infer<typeof personaSchema>;
 export async function chargerPersona(donnees: DonneesPersona): Promise<{ faits: number; limites: number }> {
   await prisma.personaProfile.upsert({
     where: { id: "self" },
-    create: { id: "self", styleGuide: donnees.styleGuide, hardLimits: donnees.hardLimits },
-    update: { styleGuide: donnees.styleGuide, hardLimits: donnees.hardLimits },
+    create: {
+      id: "self",
+      styleGuide: donnees.styleGuide,
+      hardLimits: donnees.hardLimits,
+      termesInterdits: donnees.termesInterdits,
+    },
+    update: {
+      styleGuide: donnees.styleGuide,
+      hardLimits: donnees.hardLimits,
+      termesInterdits: donnees.termesInterdits,
+    },
   });
 
   for (const fait of donnees.faits) {

@@ -9,3 +9,4 @@ src/generated/
 next-env.d.ts
 *.tsbuildinfo
 docs/prive/
+persona.json

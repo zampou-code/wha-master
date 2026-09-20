@@ -8,5 +8,6 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["tests/**/*.int.test.ts", "tests/**/*.int.test.tsx"],
+    setupFiles: ["./tests/garde-reseau.ts"],
   },
 });

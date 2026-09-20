@@ -98,7 +98,7 @@ describe("règles lexicales", () => {
       "tu fais quoi ?",
     ];
     for (const msg of messagesOrdinaires) {
-      expect(categories(msg)).toEqual([], `Message "${msg}" ne doit déclencher aucun signal`);
+      expect(categories(msg), `Message "${msg}" ne doit déclencher aucun signal`).toEqual([]);
     }
   });
 

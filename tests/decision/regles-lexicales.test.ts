@@ -159,4 +159,64 @@ describe("règles lexicales", () => {
     expect(categories("elles sont nues")).toContain(RiskCategory.INTIMATE);
     expect(categories("ils sont nus")).toContain(RiskCategory.INTIMATE);
   });
+
+  it("teste toutes les formes fléchies pour chaque mot affecté", () => {
+    // annulé (annul + e/ee + optionnel s)
+    expect(categories("rendez-vous annulé")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("rendez-vous annulée")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("rendez-vous annulés")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("rendez-vous annulées")).toContain(RiskCategory.ENGAGEMENT);
+
+    // décalé (decal + e/ee + optionnel s)
+    expect(categories("réunion décalée")).toContain(RiskCategory.ENGAGEMENT);
+    expect(categories("réunions décalées")).toContain(RiskCategory.ENGAGEMENT);
+
+    // marié (mari + e/ee + optionnel s)
+    expect(categories("tu es marié")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariée")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariés")).toContain(RiskCategory.FACT);
+    expect(categories("tu es mariées")).toContain(RiskCategory.FACT);
+
+    // déçu (decu + e/ee + optionnel s)
+    expect(categories("je suis déçu")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis déçue")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("on est déçus")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("on est déçues")).toContain(RiskCategory.EMOTIONAL);
+
+    // blessé (blesse + e/ee + optionnel s)
+    expect(categories("tu m'as blessé")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("tu m'as blessée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("vous m'avez blessés")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("vous m'avez blessées")).toContain(RiskCategory.EMOTIONAL);
+
+    // vexé (vexe + e/ee + optionnel s)
+    expect(categories("je suis vexé")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis vexée")).toContain(RiskCategory.EMOTIONAL);
+
+    // déprimé (deprime + e/ee + optionnel s)
+    expect(categories("je suis déprimé")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("je suis déprimée")).toContain(RiskCategory.EMOTIONAL);
+    expect(categories("elles sont déprimées")).toContain(RiskCategory.EMOTIONAL);
+
+    // crédit/crédits
+    expect(categories("j'ai des crédits")).toContain(RiskCategory.MONEY);
+    expect(categories("j'ai un crédit")).toContain(RiskCategory.MONEY);
+
+    // dette/dettes
+    expect(categories("j'ai une dette")).toContain(RiskCategory.MONEY);
+    expect(categories("j'ai des dettes")).toContain(RiskCategory.MONEY);
+
+    // remboursé (rembours + e/ee + optionnel s)
+    expect(categories("je suis remboursé")).toContain(RiskCategory.MONEY);
+    expect(categories("je suis remboursée")).toContain(RiskCategory.MONEY);
+    expect(categories("ils sont remboursés")).toContain(RiskCategory.MONEY);
+    expect(categories("elles sont remboursées")).toContain(RiskCategory.MONEY);
+
+    // rembourser (infinitive)
+    expect(categories("je dois rembourser")).toContain(RiskCategory.MONEY);
+
+    // virement/virements
+    expect(categories("fais moi un virement")).toContain(RiskCategory.MONEY);
+    expect(categories("fais moi des virements")).toContain(RiskCategory.MONEY);
+  });
 });

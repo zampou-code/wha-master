@@ -1,5 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { log } from "@/lib/log";
+import { deciderEtTracer } from "./decision";
 import { detecterTypeMedia, type WebhookMessage } from "./payload";
 
 export type IngestResult = {
@@ -117,6 +119,30 @@ export async function ingererMessage(
     where: { id: fil.id },
     data: { lastMessageAt: horodatage },
   });
+
+  // Seuls les messages entrants sont décidés : un message que l'utilisateur a
+  // écrit lui-même depuis son téléphone n'a pas à être classé.
+  if (payload.is_from_me) {
+    return { statut: "persiste", messageId: message.id };
+  }
+
+  // La décision ne doit jamais faire échouer l'ingestion : un message persisté
+  // reste persisté même si le moteur tombe, et GOWA ne doit pas rejouer un
+  // webhook déjà traité. On trace l'échec et on rend la main.
+  try {
+    await deciderEtTracer({
+      messageId: message.id,
+      contactId: contact.id,
+      texte: payload.body ?? null,
+      typeMedia: typeMedia,
+    });
+  } catch (erreur) {
+    log.error("Décision impossible pour un message pourtant persisté", {
+      messageId: message.id,
+      contactId: contact.id,
+      erreur: erreur instanceof Error ? erreur.message : String(erreur),
+    });
+  }
 
   return { statut: "persiste", messageId: message.id };
 }

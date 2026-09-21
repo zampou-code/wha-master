@@ -5,6 +5,7 @@ import { evaluerReglesLexicales } from "@/decision/regles-lexicales";
 import { classifier } from "@/decision/classifieur";
 import { decider } from "@/decision/moteur";
 import type { ContexteDecision, SignalRisque, Verdict } from "@/decision/types";
+import { publierEscalade } from "@/escalade/publication";
 
 const JOUR_MS = 24 * 60 * 60 * 1000;
 
@@ -114,7 +115,7 @@ export async function deciderEtTracer(params: {
 
   // P5 : la décision est tracée quelle qu'en soit l'issue, y compris IGNORED.
   const risquesUniques = [...new Set(verdict.risques)] as RiskCategory[];
-  await prisma.decision.create({
+  const decisionCreee = await prisma.decision.create({
     data: {
       messageId: params.messageId,
       contactId: contact.id,
@@ -126,6 +127,7 @@ export async function deciderEtTracer(params: {
       costUsd: coutUsd,
       rawClassification: motif ? { motif } : undefined,
     },
+    select: { id: true },
   });
 
   log.info("Décision prise", {
@@ -137,6 +139,24 @@ export async function deciderEtTracer(params: {
     fournisseur,
     latencyMs,
   });
+
+  if (verdict.issue === DecisionOutcome.ESCALATED || verdict.issue === DecisionOutcome.DRAFTED) {
+    try {
+      await publierEscalade({
+        decisionId: decisionCreee.id,
+        contactId: contact.id,
+        messageRecu: params.texte ?? "(message non textuel)",
+        risques: risquesUniques,
+      });
+    } catch (erreur) {
+      // Une escalade non publiée ne doit pas faire échouer la décision, qui est
+      // déjà tracée. Le journal en garde la trace.
+      log.error("Escalade non publiée", {
+        decisionId: decisionCreee.id,
+        erreur: erreur instanceof Error ? erreur.message : String(erreur),
+      });
+    }
+  }
 
   return verdict;
 }

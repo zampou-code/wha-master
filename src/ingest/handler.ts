@@ -4,6 +4,20 @@ import { log } from "@/lib/log";
 import { deciderEtTracer } from "./decision";
 import { detecterTypeMedia, type WebhookMessage } from "./payload";
 import type { classifier } from "@/decision/classifieur";
+import { traiterMessageControle } from "@/controle/routeur";
+import { estMessageSysteme } from "@/controle/marqueurs";
+import { createGowaClient } from "@/gowa/client";
+
+type EnvoyeurControle = (jid: string, texte: string) => Promise<{ messageId?: string }>;
+
+async function envoyerAuGroupeDeControle(jid: string, texte: string): Promise<{ messageId?: string }> {
+  return createGowaClient().sendText({ phone: jid, message: texte });
+}
+
+// ✅ = l'action a eu un effet (bascule d'état, envoi, résolution d'escalade,
+// réponse informative produite) ; ↩️ = rien n'a été fait (commande non
+// reconnue, aucune escalade ciblée par la réponse, escalade déjà résolue).
+const ACTIONS_SANS_EFFET: ReadonlySet<string> = new Set(["inconnue", "sans-cible", "deja-resolue"]);
 
 export type IngestResult = {
   statut: "persiste" | "doublon" | "groupe_de_controle" | "ignore";
@@ -24,7 +38,13 @@ export async function ingererMessage(
   // `classifierImpl` n'existe que pour l'injection en test : elle traverse
   // jusqu'à `deciderEtTracer` sans changer le comportement par défaut
   // (le vrai classifieur reste utilisé en production).
-  options: { controlGroupJid?: string; classifierImpl?: typeof classifier },
+  options: {
+    controlGroupJid?: string;
+    classifierImpl?: typeof classifier;
+    // N'existe que pour l'injection en test : l'accusé de réception par
+    // défaut passe par GOWA, jamais joint depuis la suite de tests.
+    envoyerControle?: EnvoyeurControle;
+  },
 ): Promise<IngestResult> {
   if (evenement.event !== "message") {
     return { statut: "ignore" };
@@ -33,6 +53,48 @@ export async function ingererMessage(
   const { payload } = evenement;
 
   if (options.controlGroupJid && payload.chat_id === options.controlGroupJid) {
+    // Le groupe de contrôle est adossé au compte WhatsApp de l'utilisateur :
+    // is_from_me vaut vrai à la fois quand il tape lui-même une commande et
+    // quand le système y poste (escalade, accusé de réception, expiration),
+    // puisque c'est le même compte des deux côtés.
+    // Seuls les messages que l'utilisateur écrit lui-même dans le groupe sont
+    // des commandes ; ceux des autres membres du groupe n'en sont jamais.
+    if (!payload.is_from_me) {
+      return { statut: "groupe_de_controle" };
+    }
+
+    const texte = payload.body ?? "";
+    // Un message qui commence par un marqueur est une publication du système
+    // (escalade, expiration, notre propre accusé de réception) revenue par le
+    // webhook : la traiter comme une commande la ferait réagir à elle-même.
+    if (estMessageSysteme(texte)) {
+      return { statut: "groupe_de_controle" };
+    }
+
+    try {
+      const resultat = await traiterMessageControle({
+        texte,
+        replyToWaId: payload.replied_to_id ?? null,
+      });
+      log.info("Commande de contrôle traitée", { action: resultat.action });
+
+      const prefixe = ACTIONS_SANS_EFFET.has(resultat.action) ? "↩️" : "✅";
+      const envoyerControle = options.envoyerControle ?? envoyerAuGroupeDeControle;
+      try {
+        await envoyerControle(options.controlGroupJid, `${prefixe} ${resultat.reponse}`);
+      } catch (erreur) {
+        // L'action a déjà eu lieu (traiterMessageControle a réussi) : un échec
+        // de l'accusé de réception ne doit jamais faire échouer l'ingestion.
+        log.error("Accusé de réception non publié dans le groupe de contrôle", {
+          action: resultat.action,
+          erreur: erreur instanceof Error ? erreur.message : String(erreur),
+        });
+      }
+    } catch (erreur) {
+      log.error("Commande de contrôle en échec", {
+        erreur: erreur instanceof Error ? erreur.message : String(erreur),
+      });
+    }
     return { statut: "groupe_de_controle" };
   }
 

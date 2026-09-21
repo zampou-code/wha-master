@@ -94,7 +94,7 @@ crée le compte `ADMIN_EMAIL`/`ADMIN_PASSWORD` s'il n'existe pas encore), puis
 | `GOWA_BASE_URL` | URL interne du service `gowa` | Fixée par `docker-compose.yml` (`http://gowa:3000`) pour le service `app` — inutile de la renseigner dans Dokploy |
 | `GOWA_BASIC_AUTH` | Identifiants HTTP Basic Auth de l'API REST GOWA, format `identifiant:motdepasse` | Choisi par l'opérateur (section 1) |
 | `GOWA_WEBHOOK_SECRET` | Secret partagé HMAC qui signe les webhooks envoyés par `gowa` vers `app` (`X-Hub-Signature-256`) | `openssl rand -base64 24` (section 1) |
-| `CONTROL_GROUP_JID` | JID du groupe de contrôle WhatsApp | **Laisser vide** — renseigné en phase 3 |
+| `CONTROL_GROUP_JID` | JID du groupe de contrôle WhatsApp | **Laisser vide** — le groupe se choisit dans l'interface, page « Groupe de contrôle ». Cette variable n'est qu'un repli pour les déploiements qui l'avaient déjà renseignée, et le réglage de l'interface l'emporte. |
 
 ---
 

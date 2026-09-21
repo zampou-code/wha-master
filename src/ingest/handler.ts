@@ -14,10 +14,10 @@ async function envoyerAuGroupeDeControle(jid: string, texte: string): Promise<{ 
   return createGowaClient().sendText({ phone: jid, message: texte });
 }
 
-// ✅ = l'action a eu un effet (bascule d'état, envoi, résolution d'escalade,
-// réponse informative produite) ; ↩️ = rien n'a été fait (commande non
-// reconnue, aucune escalade ciblée par la réponse, escalade déjà résolue).
-const ACTIONS_SANS_EFFET: ReadonlySet<string> = new Set(["inconnue", "sans-cible", "deja-resolue"]);
+// ✅ = la commande a produit un effet ; ↩️ = elle n'a rien fait. Le routeur
+// tranche lui-même via `aboutie` : le champ `action` ne suffisait pas, un
+// `/mode` sur un alias introuvable et un `/mode` appliqué portent la même
+// action, et l'utilisateur recevait un ✅ pour une commande sans effet.
 
 export type IngestResult = {
   statut: "persiste" | "doublon" | "groupe_de_controle" | "ignore";
@@ -78,7 +78,7 @@ export async function ingererMessage(
       });
       log.info("Commande de contrôle traitée", { action: resultat.action });
 
-      const prefixe = ACTIONS_SANS_EFFET.has(resultat.action) ? "↩️" : "✅";
+      const prefixe = resultat.aboutie ? "✅" : "↩️";
       const envoyerControle = options.envoyerControle ?? envoyerAuGroupeDeControle;
       try {
         await envoyerControle(options.controlGroupJid, `${prefixe} ${resultat.reponse}`);

@@ -91,11 +91,19 @@ async function resoudreApresEnvoi(params: {
   }
 }
 
+// `aboutie` dit si la commande a réellement produit un effet. Le champ `action`
+// ne suffit pas : un `/mode` sur un alias introuvable et un `/mode` appliqué
+// portent la même action, et l'accusé de réception posté dans le groupe s'en
+// sert pour choisir entre ✅ et ↩️. Un booléen calculé au point de décision ne
+// peut pas se désynchroniser, là où une liste de cas « sans effet » tenue
+// ailleurs finirait par en oublier un.
+export type ResultatControle = { action: string; reponse: string; aboutie: boolean };
+
 export async function traiterMessageControle(params: {
   texte: string;
   replyToWaId: string | null;
   envoyer?: Envoyeur;
-}): Promise<{ action: string; reponse: string }> {
+}): Promise<ResultatControle> {
   const envoyer = params.envoyer ?? envoyerParGowa;
   const commande: Commande = analyserCommande(params.texte);
 
@@ -104,33 +112,34 @@ export async function traiterMessageControle(params: {
   // doit jamais recevoir l'invitation « réponds au message d'escalade »
   // (qui n'aurait aucun sens pour son erreur de frappe).
   if (commande.type === "inconnue") {
-    return { action: "inconnue", reponse: AIDE_COMMANDE_INCONNUE };
+    return { action: "inconnue", reponse: AIDE_COMMANDE_INCONNUE, aboutie: false };
   }
 
   if (commande.type === "stop") {
     await basculerPause(true);
-    return { action: "stop", reponse: "Pause globale activée." };
+    return { action: "stop", reponse: "Pause globale activée.", aboutie: true };
   }
   if (commande.type === "go") {
     await basculerPause(false);
-    return { action: "go", reponse: "Pause globale levée." };
+    return { action: "go", reponse: "Pause globale levée.", aboutie: true };
   }
   if (commande.type === "statut") {
     const [actifs, ouvertes] = await Promise.all([
       prisma.contact.count({ where: { mode: { not: ContactMode.OFF } } }),
       prisma.escalation.count({ where: { status: "OPEN" } }),
     ]);
-    return { action: "statut", reponse: `${actifs} contact(s) actif(s), ${ouvertes} escalade(s) ouverte(s).` };
+    return { action: "statut", reponse: `${actifs} contact(s) actif(s), ${ouvertes} escalade(s) ouverte(s).`, aboutie: true };
   }
   if (commande.type === "qui") {
     const contact = await prisma.contact.findFirst({
       where: { alias: commande.alias },
       include: { policy: true },
     });
-    if (!contact) return { action: "qui", reponse: `Contact « ${commande.alias} » introuvable.` };
+    if (!contact) return { action: "qui", reponse: `Contact « ${commande.alias} » introuvable.`, aboutie: false };
     return {
       action: "qui",
       reponse: `${contact.alias ?? contact.jid} — mode ${LIBELLE_MODE[contact.mode]}, adulte ${contact.isAdult ? "oui" : "non"}.`,
+      aboutie: true,
     };
   }
   if (commande.type === "mode") {
@@ -141,6 +150,7 @@ export async function traiterMessageControle(params: {
       return {
         action: "mode",
         reponse: `Contact « ${commande.alias} » introuvable. L'activation initiale passe par l'interface.`,
+        aboutie: false,
       };
     }
     const cible = MODE_PAR_ALIAS[commande.mode];
@@ -152,10 +162,11 @@ export async function traiterMessageControle(params: {
       return {
         action: "mode",
         reponse: `${commande.alias} est désactivé. Réactive-le depuis l'interface, pas depuis /mode.`,
+        aboutie: false,
       };
     }
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: cible } });
-    return { action: "mode", reponse: `${commande.alias} passe en mode ${LIBELLE_MODE[cible]}.` };
+    return { action: "mode", reponse: `${commande.alias} passe en mode ${LIBELLE_MODE[cible]}.`, aboutie: true };
   }
 
   // À partir d'ici, il ne reste que les quatre commandes qui agissent sur une
@@ -168,17 +179,18 @@ export async function traiterMessageControle(params: {
     return {
       action: "sans-cible",
       reponse: "Réponds au message d'escalade concerné pour agir dessus.",
+      aboutie: false,
     };
   }
   if (escalade.status !== "OPEN") {
-    return { action: "deja-resolue", reponse: "Cette escalade est déjà résolue." };
+    return { action: "deja-resolue", reponse: "Cette escalade est déjà résolue.", aboutie: false };
   }
 
   const contact = escalade.decision.contact;
 
   if (commande.type === "envoyer") {
     if (!escalade.proposedText) {
-      return { action: "envoyer", reponse: "Aucune proposition à envoyer. Écris ton texte." };
+      return { action: "envoyer", reponse: "Aucune proposition à envoyer. Écris ton texte.", aboutie: false };
     }
     await envoyer(contact.jid, escalade.proposedText);
     await resoudreApresEnvoi({
@@ -188,7 +200,7 @@ export async function traiterMessageControle(params: {
       resolvedText: escalade.proposedText,
       messageLog: "Escalade résolue par envoi",
     });
-    return { action: "envoyer", reponse: "Envoyé." };
+    return { action: "envoyer", reponse: "Envoyé.", aboutie: true };
   }
 
   if (commande.type === "texte") {
@@ -200,7 +212,7 @@ export async function traiterMessageControle(params: {
       resolvedText: commande.contenu,
       messageLog: "Escalade résolue par texte personnalisé",
     });
-    return { action: "texte", reponse: "Envoyé." };
+    return { action: "texte", reponse: "Envoyé.", aboutie: true };
   }
 
   if (commande.type === "ignorer") {
@@ -208,7 +220,7 @@ export async function traiterMessageControle(params: {
       where: { id: escalade.id },
       data: { status: "RESOLVED", resolution: "ignorer", resolvedAt: new Date() },
     });
-    return { action: "ignorer", reponse: "Ignoré, rien n'a été envoyé." };
+    return { action: "ignorer", reponse: "Ignoré, rien n'a été envoyé.", aboutie: true };
   }
 
   if (commande.type === "pause") {
@@ -223,6 +235,7 @@ export async function traiterMessageControle(params: {
       return {
         action: "pause",
         reponse: `${contact.alias ?? contact.jid} est déjà désactivé, l'escalade est classée sans rien changer.`,
+        aboutie: true,
       };
     }
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: ContactMode.DRAFT } });
@@ -230,7 +243,7 @@ export async function traiterMessageControle(params: {
       where: { id: escalade.id },
       data: { status: "RESOLVED", resolution: "pause", resolvedAt: new Date() },
     });
-    return { action: "pause", reponse: `${contact.alias ?? contact.jid} repasse en brouillon.` };
+    return { action: "pause", reponse: `${contact.alias ?? contact.jid} repasse en brouillon.`, aboutie: true };
   }
 
   // Exhaustivité : les dix variantes de `Commande` sont toutes traitées

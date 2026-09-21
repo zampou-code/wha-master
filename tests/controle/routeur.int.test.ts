@@ -207,4 +207,25 @@ describe("routeur du groupe de contrôle", () => {
       );
     }
   });
+
+  it("distingue une commande qui agit d'une commande qui n'agit pas", async () => {
+    // L'accusé de réception posté dans le groupe choisit ✅ ou ↩️ d'après ce
+    // drapeau. Sans lui, `/mode` sur un alias introuvable portait la même
+    // action qu'un `/mode` appliqué et recevait un ✅ trompeur.
+    const { contact } = await escaladeOuverte();
+    const envoyer = vi.fn().mockResolvedValue(undefined);
+
+    expect((await traiterMessageControle({ texte: "/mode fantome auto", replyToWaId: null, envoyer })).aboutie).toBe(false);
+    expect((await traiterMessageControle({ texte: "/qui fantome", replyToWaId: null, envoyer })).aboutie).toBe(false);
+    expect((await traiterMessageControle({ texte: "/danse", replyToWaId: null, envoyer })).aboutie).toBe(false);
+    expect((await traiterMessageControle({ texte: "1", replyToWaId: null, envoyer })).aboutie).toBe(false);
+
+    expect((await traiterMessageControle({ texte: "/stop", replyToWaId: null, envoyer })).aboutie).toBe(true);
+    expect((await traiterMessageControle({ texte: "/go", replyToWaId: null, envoyer })).aboutie).toBe(true);
+    expect((await traiterMessageControle({ texte: `/qui ${contact.alias}`, replyToWaId: null, envoyer })).aboutie).toBe(true);
+    expect((await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer })).aboutie).toBe(true);
+
+    // Rejeu sur une escalade désormais résolue : plus aucun effet.
+    expect((await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer })).aboutie).toBe(false);
+  });
 });

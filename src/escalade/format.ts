@@ -11,6 +11,18 @@ const LIBELLES: Record<RiskCategory, string> = {
   NON_TEXT: "message non textuel",
 };
 
+// Le message reçu est la seule partie non bornée de l'escalade : la proposition
+// est déjà plafonnée par la validation du rédacteur. Un contact peut envoyer un
+// pavé, et l'escalade est lue sur un téléphone entre deux choses — au-delà de
+// cette longueur on coupe, le fil reste consultable dans WhatsApp.
+const LONGUEUR_MESSAGE_RECU = 300;
+
+function tronquer(texte: string): string {
+  return texte.length > LONGUEUR_MESSAGE_RECU
+    ? `${texte.slice(0, LONGUEUR_MESSAGE_RECU).trimEnd()}…`
+    : texte;
+}
+
 export function formaterEscalade(params: {
   alias: string;
   risques: RiskCategory[];
@@ -23,7 +35,7 @@ export function formaterEscalade(params: {
     : "à vérifier";
 
   const entete = `⚠️ ${params.alias} — ${risques}`;
-  const recu = `« ${params.messageRecu} »`;
+  const recu = `« ${tronquer(params.messageRecu)} »`;
 
   if (params.proposition !== null) {
     return [

@@ -49,4 +49,26 @@ describe("mise en forme d'une escalade", () => {
     const texte = formaterEscalade({ alias: "S", risques: [], messageRecu: "x", proposition: "y", motifRefus: null });
     expect(texte).toContain("S");
   });
+
+  it("coupe un message reçu trop long plutôt que d'inonder l'écran", () => {
+    const pave = "mot ".repeat(200);
+    const texte = formaterEscalade({
+      alias: "Sarah", risques: [RiskCategory.EMOTIONAL], messageRecu: pave,
+      proposition: "ok", motifRefus: null,
+    });
+    // L'escalade entière doit rester lisible sur un téléphone : le message reçu
+    // est coupé, mais l'en-tête, la proposition et les actions restent présents.
+    expect(texte.length).toBeLessThan(600);
+    expect(texte).toContain("…");
+    expect(texte).toContain("1 envoyer");
+  });
+
+  it("laisse intact un message reçu de longueur normale", () => {
+    const texte = formaterEscalade({
+      alias: "Sarah", risques: [], messageRecu: "on se voit vendredi ?",
+      proposition: "ok", motifRefus: null,
+    });
+    expect(texte).toContain("on se voit vendredi ?");
+    expect(texte).not.toContain("…");
+  });
 });

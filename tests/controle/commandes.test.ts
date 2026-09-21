@@ -62,4 +62,12 @@ describe("analyse des commandes du groupe de contrôle", () => {
   it("renvoie inconnue sur une entrée vide", () => {
     expect(analyserCommande("   ")).toEqual({ type: "inconnue", brut: "   " });
   });
+
+  it("refuse un « 2 » seul plutôt que d'envoyer le caractère au contact", () => {
+    // Sans ce cas, répondre « 2 » à une escalade — le geste de quelqu'un qui
+    // s'apprête à écrire sa réponse — expédierait « 2 » à la personne.
+    expect(analyserCommande("2")).toEqual({ type: "inconnue", brut: "2" });
+    expect(analyserCommande(" 2 ")).toEqual({ type: "inconnue", brut: " 2 " });
+    expect(analyserCommande("2   ")).toEqual({ type: "inconnue", brut: "2   " });
+  });
 });

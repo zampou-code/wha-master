@@ -14,6 +14,12 @@ vi.mock("@/config/env", () => ({
 }));
 vi.mock("@/ingest/handler", () => ({ ingererMessage }));
 
+// Le groupe de contrôle se lit en base depuis qu'il se règle dans l'interface.
+// Ce fichier teste la signature et la validation du payload, pas la résolution
+// du groupe : on l'injecte plutôt que d'ouvrir une connexion.
+const lireGroupeDeControle = vi.fn().mockResolvedValue(null);
+vi.mock("@/controle/groupe", () => ({ lireGroupeDeControle }));
+
 // Journal de test : capture les lignes émises par `log` au lieu d'espionner
 // console.error/console.debug, à la fois pour vérifier ce qui est journalisé
 // et pour garder une sortie de test vierge (le journal réel écrit sur
@@ -144,5 +150,21 @@ describe("POST /api/webhook/gowa", () => {
     const reponse = await POST(requete(corps, signer(corps)));
     expect(reponse.status).toBe(500);
     await expect(reponse.json()).resolves.toEqual({ erreur: "Ingestion impossible" });
+  });
+
+  it("transmet à l'ingestion le groupe de contrôle résolu en base", async () => {
+    // Sans cette assertion, la résolution pourrait être branchée sur rien :
+    // le groupe choisi dans l'interface n'arriverait jamais au handler, et les
+    // commandes tapées dans le groupe seraient ingérées comme une conversation.
+    lireGroupeDeControle.mockResolvedValueOnce({
+      jid: "120363000000000000@g.us", nom: "Poste de contrôle", source: "interface",
+    });
+    const corps = JSON.stringify(evenementMessage);
+    const { POST } = await import("@/app/api/webhook/gowa/route");
+    await POST(requete(corps, signer(corps)));
+    expect(ingererMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ controlGroupJid: "120363000000000000@g.us" }),
+    );
   });
 });

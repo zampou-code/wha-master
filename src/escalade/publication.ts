@@ -1,7 +1,7 @@
 import type { RiskCategory } from "@/generated/prisma/client";
-import { getEnv } from "@/config/env";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
+import { lireGroupeDeControle } from "@/controle/groupe";
 import { createGowaClient } from "@/gowa/client";
 import { assemblerContexte } from "@/redacteur/contexte";
 import { rediger, type ResultatRedaction } from "@/redacteur/redacteur";
@@ -21,7 +21,7 @@ export async function publierEscalade(params: {
   risques: RiskCategory[];
   envoyer?: Envoyeur;
 }): Promise<{ escaladeId: string } | null> {
-  const groupe = getEnv().CONTROL_GROUP_JID;
+  const groupe = (await lireGroupeDeControle())?.jid;
   if (!groupe) {
     // `error` et non `warn` : c'est l'état par défaut d'un déploiement neuf, et
     // tant qu'il dure, chaque message à risque est abandonné sans trace ailleurs

@@ -9,6 +9,8 @@ import {
   sendSchema,
   statusSchema,
   pairCodeSchema,
+  groupsListSchema,
+  type GowaGroupe,
   type GowaLoginQr,
   type GowaSendResult,
   type GowaStatus,
@@ -225,6 +227,17 @@ export class GowaClient {
     if (params.replyMessageId) body.reply_message_id = params.replyMessageId;
     const { results } = await this.appeler("/send/message", sendSchema, { method: "POST", body });
     return { messageId: results.message_id, status: results.status };
+  }
+
+  async listGroups(deviceId?: string): Promise<GowaGroupe[]> {
+    const { results } = await this.appeler("/user/my/groups", groupsListSchema, { deviceId });
+    return results.data.map((groupe) => ({
+      jid: groupe.JID,
+      nom: groupe.Name?.trim() || groupe.JID,
+      participants: groupe.ParticipantCount ?? null,
+      estCommunaute: groupe.IsParent ?? false,
+      annoncesSeulement: groupe.IsAnnounce ?? false,
+    }));
   }
 
   async sendChatPresence(params: { phone: string; action: "start" | "stop" }): Promise<void> {

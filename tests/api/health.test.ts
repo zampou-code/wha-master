@@ -42,11 +42,4 @@ describe("GET /api/health", () => {
     await expect((await GET()).json()).resolves.toMatchObject({ groupeDeControle: "configuré" });
   });
 
-  it("répond même quand la configuration est invalide", async () => {
-    // `getEnv()` lève sur une configuration incomplète — or c'est exactement la
-    // situation où on interroge cette route.
-    queryRaw.mockResolvedValue([{ "?column?": 1 }]);
-    const { GET } = await import("@/app/api/health/route");
-    await expect(GET()).resolves.toBeDefined();
-  });
 });

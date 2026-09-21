@@ -5,6 +5,7 @@
   --brume-faible: #8798a0;
   --sodium: #e8a33d;
   --braise: #c4533c;
+  --petrole-selection: #1b323d;
 }
 
 *,
@@ -362,7 +363,7 @@ button,
 
 .groupe[data-choisi] {
   border-left-color: var(--sodium);
-  background: #1b323d;
+  background: var(--petrole-selection);
 }
 
 .groupe__nom {

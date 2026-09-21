@@ -44,7 +44,15 @@ export default function Reglages() {
       router.push("/login");
       return;
     }
-    if (reglage.ok) setActuel(((await reglage.json()) as { groupe: GroupeDeControle | null }).groupe);
+    if (reglage.ok) {
+      setActuel(((await reglage.json()) as { groupe: GroupeDeControle | null }).groupe);
+    } else {
+      // Sans cette branche, un réglage illisible s'affichait exactement comme
+      // « aucun groupe choisi » : l'utilisateur en aurait conclu qu'il n'avait
+      // rien réglé, et aurait pu en relier un autre par-dessus.
+      setActuel(null);
+      setErreur("Impossible de lire le réglage actuel. Ce qui s'affiche peut être faux.");
+    }
     if (liste.ok) {
       setGroupes(((await liste.json()) as { groupes: Groupe[] }).groupes);
     } else {
@@ -80,7 +88,7 @@ export default function Reglages() {
       return;
     }
     const corps = (await reponse.json().catch(() => null)) as
-      | { groupe?: GroupeDeControle; confirmationEnvoyee?: boolean; erreur?: string }
+      | { groupe?: GroupeDeControle; erreur?: string }
       | null;
     if (!reponse.ok) {
       setErreur(corps?.erreur ?? MESSAGE_INJOIGNABLE);
@@ -89,11 +97,9 @@ export default function Reglages() {
     }
     setActuel(corps?.groupe ?? null);
     setChoisi(null);
-    setSucces(
-      corps?.confirmationEnvoyee
-        ? "Groupe relié. Un message de confirmation vient d'y être posté."
-        : "Groupe relié, mais le message de confirmation n'est pas parti. Vérifie le groupe.",
-    );
+    // Le message de vérification est parti avant l'enregistrement : s'il avait
+    // échoué, la réponse serait en erreur et rien n'aurait été changé.
+    setSucces("Groupe relié. Un message de vérification vient d'y être posté — va le lire.");
     setEnregistrement(false);
   }, [choisi, router]);
 

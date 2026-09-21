@@ -75,12 +75,14 @@ export async function PUT(request: Request) {
     );
   }
 
-  await enregistrerGroupeDeControle({ jid: choisi.jid, nom: choisi.nom });
-
-  // Message de vérification : il prouve tout de suite que l'envoi fonctionne,
-  // plutôt que de le découvrir à la première escalade réelle. Le marqueur le
-  // fait ignorer au retour par le webhook, comme toute publication du système.
-  let confirmationEnvoyee = true;
+  // On prouve AVANT d'enregistrer. Un envoi de vérification qui échoue n'est
+  // pas un détail cosmétique : c'est la démonstration que les escalades
+  // n'arriveront jamais dans ce groupe. Enregistrer quand même laisserait un
+  // réglage d'apparence valide sur lequel chaque message à valider disparaîtrait
+  // en silence — le cas concret étant un groupe « annonces seulement » où le
+  // propriétaire n'est pas administrateur. Tester la capacité réelle vaut mieux
+  // que deviner d'après les drapeaux du groupe : un groupe en annonces dont il
+  // EST administrateur fonctionne parfaitement, et doit rester utilisable.
   try {
     await createGowaClient().sendText({
       phone: choisi.jid,
@@ -89,17 +91,24 @@ export async function PUT(request: Request) {
         "C'est ici que les messages à valider arriveront.",
     });
   } catch (erreur) {
-    // Le réglage reste enregistré : l'envoi peut échouer pour une raison
-    // passagère, et le perdre obligerait à tout recommencer.
-    confirmationEnvoyee = false;
-    log.error("Message de confirmation non posté dans le groupe de contrôle", {
+    log.error("Envoi de vérification impossible, groupe de contrôle non enregistré", {
       jid: choisi.jid,
+      annoncesSeulement: choisi.annoncesSeulement,
       erreur: erreur instanceof Error ? erreur : String(erreur),
     });
+    return NextResponse.json(
+      {
+        erreur: choisi.annoncesSeulement
+          ? "Impossible d'écrire dans ce groupe : il est en « annonces seulement » et tu n'y es pas administrateur. Rien n'a été changé."
+          : "Impossible d'écrire dans ce groupe. Rien n'a été changé — réessaie.",
+      },
+      { status: 502 },
+    );
   }
+
+  await enregistrerGroupeDeControle({ jid: choisi.jid, nom: choisi.nom });
 
   return NextResponse.json({
     groupe: { jid: choisi.jid, nom: choisi.nom, source: "interface" },
-    confirmationEnvoyee,
   });
 }

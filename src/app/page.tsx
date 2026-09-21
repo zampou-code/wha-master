@@ -14,6 +14,7 @@ export default function Accueil() {
   const router = useRouter();
   const [statut, setStatut] = useState<Statut | null>(null);
   const [groupe, setGroupe] = useState<GroupeDeControle | null>(null);
+  const [groupeIllisible, setGroupeIllisible] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [chargement, setChargement] = useState(true);
 
@@ -41,11 +42,15 @@ export default function Accueil() {
     // Le groupe de contrôle est l'autre moitié de l'état du système : sans lui,
     // l'appareil a beau être relié, rien n'est jamais proposé ni envoyé. Son
     // absence doit se voir dès l'accueil. Un échec ici ne masque pas la liaison.
+    // Un échec de lecture ne doit pas ressembler à « aucun groupe choisi » :
+    // les deux états mènent à des décisions opposées.
     try {
       const reglage = await fetch("/api/controle/groupe");
-      if (reglage.ok) setGroupe(((await reglage.json()) as { groupe: GroupeDeControle | null }).groupe);
+      setGroupe(reglage.ok ? ((await reglage.json()) as { groupe: GroupeDeControle | null }).groupe : null);
+      setGroupeIllisible(!reglage.ok);
     } catch {
       setGroupe(null);
+      setGroupeIllisible(true);
     }
     setChargement(false);
   }, [router]);
@@ -97,16 +102,26 @@ export default function Accueil() {
         </div>
 
         {!erreur && !chargement && statut?.isLoggedIn && (
-          <div className="bloc-etat" data-etat={groupe ? "connecte" : "attente"} aria-live="polite">
+          <div
+            className="bloc-etat"
+            data-etat={groupeIllisible ? "erreur" : groupe ? "connecte" : "attente"}
+            aria-live="polite"
+          >
             <span className="bloc-etat__indicateur" aria-hidden="true" />
             <div className="bloc-etat__texte">
               <p className="bloc-etat__libelle">
-                {groupe ? (groupe.nom ?? "Groupe de contrôle relié") : "Aucun groupe de contrôle"}
+                {groupeIllisible
+                  ? "Groupe de contrôle indéterminé"
+                  : groupe
+                    ? (groupe.nom ?? "Groupe de contrôle relié")
+                    : "Aucun groupe de contrôle"}
               </p>
               <p className="bloc-etat__detail">
-                {groupe
-                  ? "Les messages à valider y sont soumis avant tout envoi."
-                  : "Rien ne te sera proposé tant qu'aucun groupe n'est choisi."}
+                {groupeIllisible
+                  ? "Le réglage n'a pas pu être lu. Ouvre les réglages pour vérifier."
+                  : groupe
+                    ? "Les messages à valider y sont soumis avant tout envoi."
+                    : "Rien ne te sera proposé tant qu'aucun groupe n'est choisi."}
               </p>
             </div>
           </div>

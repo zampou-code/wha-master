@@ -154,10 +154,11 @@ model Message {
 }
 
 model PersonaProfile {
-  id         String   @id @default("self")
-  styleGuide Json     @default("{}")
-  hardLimits String[] @default([])
-  updatedAt  DateTime @updatedAt
+  id              String   @id @default("self")
+  styleGuide      Json     @default("{}")
+  hardLimits      String[] @default([])
+  termesInterdits String[] @default([])
+  updatedAt       DateTime @updatedAt
 }
 
 model PersonaFact {
@@ -208,7 +209,7 @@ model Escalation {
   decisionId          String           @unique
   decision            Decision         @relation(fields: [decisionId], references: [id], onDelete: Cascade)
   status              EscalationStatus @default(OPEN)
-  controlMessageWaId  String?
+  controlMessageWaId  String?          @unique
   proposedText        String?
   resolution          String?
   resolvedText        String?

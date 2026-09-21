@@ -94,7 +94,7 @@ export const RADICAUX_VERBES: readonly RadicalDeclare[] = [
   { radical: "rembours", categorie: RiskCategory.MONEY },
 ];
 
-export { formesFlechies, formesVerbe };
+export { flechi, formesFlechies, formesVerbe };
 
 // Ces motifs sont délibérément larges. Un faux positif coûte une escalade que
 // l'utilisateur balaie d'un geste ; un faux négatif envoie un message qui

@@ -5,8 +5,19 @@ import { evaluerReglesLexicales } from "@/decision/regles-lexicales";
 import { classifier } from "@/decision/classifieur";
 import { decider } from "@/decision/moteur";
 import type { ContexteDecision, SignalRisque, Verdict } from "@/decision/types";
+import { publierEscalade } from "@/escalade/publication";
 
 const JOUR_MS = 24 * 60 * 60 * 1000;
+
+// La phase 3a n'envoie jamais seule : un verdict AUTO_SENT est soumis à
+// validation comme un brouillon. Sans AUTO_SENT dans cet ensemble, un contact
+// en mode automatique tombait dans un trou noir — ni envoi, ni escalade, ni
+// alerte — pendant que la base enregistrait « envoyé automatiquement ».
+const PRODUIT_UNE_ESCALADE: ReadonlySet<DecisionOutcome> = new Set([
+  DecisionOutcome.ESCALATED,
+  DecisionOutcome.DRAFTED,
+  DecisionOutcome.AUTO_SENT,
+]);
 
 export async function deciderEtTracer(params: {
   messageId: string;
@@ -114,29 +125,56 @@ export async function deciderEtTracer(params: {
 
   // P5 : la décision est tracée quelle qu'en soit l'issue, y compris IGNORED.
   const risquesUniques = [...new Set(verdict.risques)] as RiskCategory[];
-  await prisma.decision.create({
+
+  // Le moteur dit AUTO_SENT, mais rien n'envoie seul en phase 3a : ce qui arrive
+  // réellement au message, c'est un brouillon soumis à validation. Persister
+  // AUTO_SENT serait une affirmation fausse, qui survivrait à la phase.
+  // `ruleFired` garde la trace du verdict d'origine (`table.auto`).
+  const issueEffective =
+    verdict.issue === DecisionOutcome.AUTO_SENT ? DecisionOutcome.DRAFTED : verdict.issue;
+  const decisionCreee = await prisma.decision.create({
     data: {
       messageId: params.messageId,
       contactId: contact.id,
       risks: risquesUniques,
       ruleFired: verdict.regle,
-      outcome: verdict.issue,
+      outcome: issueEffective,
       classifierProvider: fournisseur,
       latencyMs,
       costUsd: coutUsd,
       rawClassification: motif ? { motif } : undefined,
     },
+    select: { id: true },
   });
 
   log.info("Décision prise", {
     contactId: contact.id,
     messageId: params.messageId,
-    issue: verdict.issue,
+    issue: issueEffective,
+    verdictMoteur: verdict.issue,
     regle: verdict.regle,
     risques: risquesUniques,
     fournisseur,
     latencyMs,
   });
+
+  if (PRODUIT_UNE_ESCALADE.has(verdict.issue)) {
+    try {
+      await publierEscalade({
+        decisionId: decisionCreee.id,
+        contactId: contact.id,
+        messageRecu: params.texte ?? "(message non textuel)",
+        risques: risquesUniques,
+      });
+    } catch (erreur) {
+      // Une escalade non publiée ne doit pas faire échouer la décision, qui est
+      // déjà tracée. Le journal en garde la trace.
+      log.error("Escalade non publiée", {
+        decisionId: decisionCreee.id,
+        erreur: erreur instanceof Error ? erreur.message : String(erreur),
+      });
+    }
+  }
 
   return verdict;
 }

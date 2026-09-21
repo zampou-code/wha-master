@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { ingererMessage } from "@/ingest/handler";
 import { resetDb } from "../helpers/db";
-import { DecisionOutcome, MediaType } from "@/generated/prisma/client";
+import { estMessageSysteme } from "@/controle/marqueurs";
+import { DecisionOutcome, MediaType, RiskCategory } from "@/generated/prisma/client";
+import { formaterEscalade } from "@/escalade/format";
 import type { ResultatClassification } from "@/decision/classifieur";
 
 // Classifieur injecté : ne doit jamais atteindre un vrai fournisseur IA dans
@@ -81,6 +83,76 @@ describe("ingestion d'un message", () => {
     );
     expect(resultat.statut).toBe("groupe_de_controle");
     expect(await prisma.message.count()).toBe(0);
+  });
+
+  it("ignore les messages du groupe de contrôle qui ne viennent pas de moi (autres membres)", async () => {
+    const envoyerControle = vi.fn().mockResolvedValue({});
+    const resultat = await ingererMessage(
+      evenement({ id: "MSG-AUTRE", chat_id: "1234-5678@g.us", is_from_me: false, body: "1" }),
+      { controlGroupJid: "1234-5678@g.us", envoyerControle },
+    );
+    expect(resultat.statut).toBe("groupe_de_controle");
+    expect(envoyerControle).not.toHaveBeenCalled();
+  });
+
+  it("ignore les messages que le système poste lui-même dans le groupe de contrôle (marqueur)", async () => {
+    const envoyerControle = vi.fn().mockResolvedValue({});
+    const resultat = await ingererMessage(
+      evenement({
+        id: "MSG-MARQ", chat_id: "1234-5678@g.us", is_from_me: true,
+        // Entrée dérivée du producteur réel : un littéral écrit à la main
+        // vérifierait l'effet sans garantir que le code qui poste suit la même
+        // convention. `tests/controle/marqueurs.test.ts` éprouve la convention
+        // elle-même sur toutes les formes que le système publie.
+        body: formaterEscalade({
+          alias: "sarah", risques: [RiskCategory.ENGAGEMENT],
+          messageRecu: "on se voit vendredi ?", proposition: "Vendredi ça me va", motifRefus: null,
+        }),
+      }),
+      { controlGroupJid: "1234-5678@g.us", envoyerControle },
+    );
+    expect(resultat.statut).toBe("groupe_de_controle");
+    expect(envoyerControle).not.toHaveBeenCalled();
+    // /stop n'a jamais été analysé : aucun état de pause n'a été créé.
+    expect(await prisma.systemState.findUnique({ where: { id: "singleton" } })).toBeNull();
+  });
+
+  it("traite une commande du groupe de contrôle et poste l'accusé de réception (✅)", async () => {
+    const envoyerControle = vi.fn().mockResolvedValue({ messageId: "WA-ACK-1" });
+    const resultat = await ingererMessage(
+      evenement({ id: "MSG-STOP", chat_id: "1234-5678@g.us", is_from_me: true, body: "/stop" }),
+      { controlGroupJid: "1234-5678@g.us", envoyerControle },
+    );
+    expect(resultat.statut).toBe("groupe_de_controle");
+    const etat = await prisma.systemState.findUnique({ where: { id: "singleton" } });
+    expect(etat?.globalPaused).toBe(true);
+    expect(envoyerControle).toHaveBeenCalledTimes(1);
+    const [jid, texte] = envoyerControle.mock.calls[0];
+    expect(jid).toBe("1234-5678@g.us");
+    expect(texte).toBe("✅ Pause globale activée.");
+  });
+
+  it("poste un accusé ↩️ quand la commande n'a rien fait (commande inconnue)", async () => {
+    const envoyerControle = vi.fn().mockResolvedValue({ messageId: "WA-ACK-2" });
+    await ingererMessage(
+      evenement({ id: "MSG-INC", chat_id: "1234-5678@g.us", is_from_me: true, body: "/danse" }),
+      { controlGroupJid: "1234-5678@g.us", envoyerControle },
+    );
+    expect(envoyerControle).toHaveBeenCalledTimes(1);
+    const [, texte] = envoyerControle.mock.calls[0];
+    expect(texte.startsWith("↩️ ")).toBe(true);
+  });
+
+  it("un échec d'envoi de l'accusé de réception ne fait pas échouer l'ingestion", async () => {
+    const envoyerControle = vi.fn().mockRejectedValue(new Error("GOWA injoignable"));
+    const resultat = await ingererMessage(
+      evenement({ id: "MSG-STOP2", chat_id: "1234-5678@g.us", is_from_me: true, body: "/stop" }),
+      { controlGroupJid: "1234-5678@g.us", envoyerControle },
+    );
+    expect(resultat.statut).toBe("groupe_de_controle");
+    // L'action a bien eu lieu malgré l'échec de l'accusé de réception.
+    const etat = await prisma.systemState.findUnique({ where: { id: "singleton" } });
+    expect(etat?.globalPaused).toBe(true);
   });
 
   it("enregistre le type de média quand le message n'est pas textuel", async () => {
@@ -174,5 +246,30 @@ describe("ingestion d'un message", () => {
     expect(rejeu.statut).toBe("doublon");
     const decision = await prisma.decision.findUnique({ where: { messageId: message!.id } });
     expect(decision).not.toBeNull();
+  });
+
+  it("prévient dans le groupe quand une commande n'est pas allée à son terme", async () => {
+    // Sans avertissement, l'utilisateur ne voit aucun accusé, conclut que son
+    // « 1 » n'est pas passé, et le retape : l'escalade étant restée OPEN avec sa
+    // proposition, la personne en face reçoit deux fois le même message.
+    const routeur = await import("@/controle/routeur");
+    const espion = vi
+      .spyOn(routeur, "traiterMessageControle")
+      .mockRejectedValueOnce(new Error("base injoignable"));
+    const envoyerControle = vi.fn().mockResolvedValue({ messageId: "WA-WARN-1" });
+
+    const resultat = await ingererMessage(
+      evenement({ id: "MSG-ECHEC", chat_id: "1234-5678@g.us", is_from_me: true, body: "1" }),
+      { controlGroupJid: "1234-5678@g.us", envoyerControle },
+    );
+
+    expect(resultat.statut).toBe("groupe_de_controle");
+    expect(envoyerControle).toHaveBeenCalledTimes(1);
+    const [destinataire, texte] = envoyerControle.mock.calls[0];
+    expect(destinataire).toBe("1234-5678@g.us");
+    expect(String(texte)).toMatch(/n'est pas allée à son terme/i);
+    // L'avertissement porte un marqueur : il ne reviendra pas comme une commande.
+    expect(estMessageSysteme(String(texte))).toBe(true);
+    espion.mockRestore();
   });
 });

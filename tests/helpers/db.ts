@@ -1,15 +1,25 @@
 import { prisma } from "@/lib/prisma";
 
-export async function resetDb(): Promise<void> {
-  // ProviderConfig/ProviderRoute sont inclus : un test (tests/ia/registre.int.test.ts)
-  // laisse une route par défaut en base après sa dernière assertion. Sans ce
-  // nettoyage, un test d'un autre fichier dont le contact n'est pas OFF (ex.
-  // handler.int.test.ts) peut faire résoudre cette route par le classifieur
-  // réel et atteindre un vrai fournisseur IA — interdit dans les tests.
-  // SystemState est inclus pour la même raison : un test qui pose
-  // globalPaused = true (Gate 0) ne doit pas laisser cet état fuiter vers les
-  // tests suivants, y compris ceux d'autres fichiers.
-  await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "Message", "Thread", "ContactPolicy", "ContactProfile", "Decision", "Escalation", "Contact", "ProviderRoute", "ProviderConfig", "SystemState" RESTART IDENTITY CASCADE',
+// La liste tenue à la main a été trouvée incomplète trois fois, et l'une de ces
+// omissions a laissé des tests d'intégration atteindre un vrai fournisseur d'IA.
+// Une liste dérivée du schéma ne peut plus rien oublier : toute table ajoutée
+// par une migration future est nettoyée sans que personne y pense.
+let cache: string[] | null = null;
+
+export async function tablesATronquer(): Promise<string[]> {
+  if (cache) return cache;
+  const lignes = await prisma.$queryRawUnsafe<{ table_name: string }[]>(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+       AND table_name NOT LIKE '\\_prisma%'`,
   );
+  cache = lignes.map((l) => l.table_name);
+  return cache;
+}
+
+export async function resetDb(): Promise<void> {
+  const tables = await tablesATronquer();
+  if (tables.length === 0) return;
+  const liste = tables.map((t) => `"${t}"`).join(", ");
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${liste} RESTART IDENTITY CASCADE`);
 }

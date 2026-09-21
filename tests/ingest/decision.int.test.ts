@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { deciderEtTracer } from "@/ingest/decision";
 import { resetDb } from "../helpers/db";
+import { resetEnvCache } from "@/config/env";
 import { ContactMode, DecisionOutcome, MediaType, RiskCategory } from "@/generated/prisma/client";
 
 async function contactAvecMessage(mode: ContactMode) {
@@ -30,6 +31,14 @@ describe("décision et traçage", () => {
   beforeEach(async () => {
     await resetDb();
     classifieurCalme.mockClear();
+  });
+
+  // `getEnv()` met sa lecture en cache au niveau du module : toute mutation de
+  // `process.env.CONTROL_GROUP_JID` doit être suivie de `resetEnvCache()`
+  // pour être vue par `publierEscalade`, appelé depuis `deciderEtTracer`.
+  afterEach(() => {
+    delete process.env.CONTROL_GROUP_JID;
+    resetEnvCache();
   });
 
   it("n'appelle jamais le classifieur pour un contact en OFF (P1)", async () => {
@@ -150,5 +159,59 @@ describe("décision et traçage", () => {
     });
     const apres = await prisma.contact.findUnique({ where: { id: contact.id } });
     expect(apres!.mode).toBe(ContactMode.AUTO);
+  });
+
+  it("publie une escalade quand le verdict est ESCALATED", async () => {
+    process.env.CONTROL_GROUP_JID = "1234-5678@g.us";
+    resetEnvCache();
+    const { contact, message } = await contactAvecMessage(ContactMode.DRAFT);
+    await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "tu peux m'envoyer 50000 F ?",
+      typeMedia: null, classifierImpl: classifieurCalme,
+    });
+    const decision = await prisma.decision.findUnique({
+      where: { messageId: message.id }, include: { escalation: true },
+    });
+    expect(decision?.escalation).not.toBeNull();
+  });
+
+  it("ne publie pas d'escalade sur un verdict IGNORED (P1)", async () => {
+    process.env.CONTROL_GROUP_JID = "1234-5678@g.us";
+    resetEnvCache();
+    const { contact, message } = await contactAvecMessage(ContactMode.OFF);
+    await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "on se voit vendredi ?",
+      typeMedia: null, classifierImpl: classifieurCalme,
+    });
+    const decision = await prisma.decision.findUnique({
+      where: { messageId: message.id }, include: { escalation: true },
+    });
+    expect(decision?.escalation).toBeNull();
+  });
+
+  it("publie une escalade sur un verdict AUTO_SENT : la phase 3a n'envoie jamais seule", async () => {
+    // Sans cette entrée, un contact en mode automatique tombait dans un trou
+    // noir : ni envoi, ni escalade, ni alerte, pendant que la base enregistrait
+    // « envoyé automatiquement ». La personne en face attendait une réponse que
+    // personne n'avait vu passer.
+    process.env.CONTROL_GROUP_JID = "1234-5678@g.us";
+    resetEnvCache();
+    const { contact, message } = await contactAvecMessage(ContactMode.AUTO);
+    const verdict = await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "coucou ça va ?",
+      typeMedia: null, classifierImpl: classifieurCalme,
+    });
+    // Le moteur rend bien AUTO_SENT...
+    expect(verdict.issue).toBe(DecisionOutcome.AUTO_SENT);
+
+    const decision = await prisma.decision.findUnique({
+      where: { messageId: message.id }, include: { escalation: true },
+    });
+    // ...mais ce qui est arrivé au message, c'est un brouillon soumis à
+    // validation : persister AUTO_SENT serait une affirmation fausse.
+    expect(decision?.outcome).toBe(DecisionOutcome.DRAFTED);
+    expect(decision?.escalation).not.toBeNull();
+    // Le verdict du moteur reste traçable par la règle déclenchée.
+    expect(decision?.ruleFired).toContain("auto");
   });
 });

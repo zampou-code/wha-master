@@ -9,8 +9,30 @@ function creerClient(): PrismaClient {
   return new PrismaClient({ adapter });
 }
 
-export const prisma: PrismaClient = globalForPrisma.prisma ?? creerClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+function instance(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = creerClient();
+  }
+  return globalForPrisma.prisma;
 }
+
+// Instanciation paresseuse. Un `const prisma = creerClient()` au niveau module
+// exécutait getEnv() à l'import, ce qui a imposé deux contournements : des
+// variables factices dans le Dockerfile pour que `next build` passe, et un
+// `await import()` dans la couche IA pour que ses tests unitaires tournent sans
+// base. Le proxy préserve exactement l'API — `import { prisma }` puis
+// `prisma.contact...` — mais ne construit rien tant qu'aucune propriété n'est lue.
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_cible, propriete) {
+    // Ni `recepteur` passé à Reflect.get, ni fonction renvoyée telle quelle :
+    // dans les deux cas `this` vaudrait le proxy à l'intérieur du client
+    // Prisma, dont les accesseurs lisent des champs privés (`#`) qui lèvent
+    // sur tout autre objet que l'instance réelle.
+    const reel = instance();
+    const valeur = Reflect.get(reel, propriete);
+    return typeof valeur === "function" ? valeur.bind(reel) : valeur;
+  },
+  has(_cible, propriete) {
+    return Reflect.has(instance(), propriete);
+  },
+});

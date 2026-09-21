@@ -83,4 +83,30 @@ describe("expiration des escalades", () => {
     await expirerEscalades({ envoyer });
     expect(envoyer.mock.calls[0][0]).toBe("1234-5678@g.us");
   });
+
+  it("n'expire pas une escalade résolue entre la lecture et l'écriture", async () => {
+    // Le cas réel : l'utilisateur répond « 1 » à la seconde près où la tâche
+    // planifiée passe. Sans la condition `status: "OPEN"` sur l'écriture, son
+    // escalade serait marquée expirée alors que le message est bien parti.
+    const e = await escalade(new Date(Date.now() - 1000));
+    const envoyer = vi.fn().mockResolvedValue({});
+    const resolueEntreTemps = async () => {
+      await prisma.escalation.update({ where: { id: e.id }, data: { status: "RESOLVED" } });
+      return new Date();
+    };
+    const r = await expirerEscalades({ maintenant: await resolueEntreTemps(), envoyer });
+    expect(r.expirees).toBe(0);
+    expect(envoyer).not.toHaveBeenCalled();
+    expect((await prisma.escalation.findUnique({ where: { id: e.id } }))?.status).toBe("RESOLVED");
+  });
+
+  it("ne compte que les escalades réellement expirées dans le rappel", async () => {
+    await escalade(new Date(Date.now() - 1000));
+    await escalade(new Date(Date.now() - 2000));
+    const envoyer = vi.fn().mockResolvedValue({});
+    const r = await expirerEscalades({ envoyer });
+    expect(r.expirees).toBe(2);
+    expect(String(envoyer.mock.calls[0][1])).toContain("2");
+    expect(String(envoyer.mock.calls[0][1]).startsWith("⏳")).toBe(true);
+  });
 });

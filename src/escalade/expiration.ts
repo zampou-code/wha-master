@@ -22,10 +22,16 @@ export async function expirerEscalades(params: {
   });
   if (depassees.length === 0) return { expirees: 0 };
 
-  await prisma.escalation.updateMany({
-    where: { id: { in: depassees.map((e) => e.id) } },
+  // `status: "OPEN"` est répété ici, et pas seulement dans la lecture au-dessus :
+  // entre les deux requêtes, l'utilisateur peut très bien avoir répondu « 1 » à
+  // une escalade sur le point d'expirer. Sans cette condition, on la marquerait
+  // EXPIRED alors que le message est parti — et le rappel annoncerait une
+  // escalade perdue qui ne l'est pas. `count` donne le nombre réellement expiré.
+  const { count } = await prisma.escalation.updateMany({
+    where: { id: { in: depassees.map((e) => e.id) }, status: "OPEN" },
     data: { status: "EXPIRED" },
   });
+  if (count === 0) return { expirees: 0 };
 
   const groupe = getEnv().CONTROL_GROUP_JID;
   if (groupe) {
@@ -33,7 +39,7 @@ export async function expirerEscalades(params: {
     // d'échéance, plusieurs peuvent expirer ensemble, et autant de
     // notifications rendraient le groupe inutilisable.
     const texte =
-      `⏳ ${depassees.length} escalade(s) expirée(s) sans réponse. ` +
+      `⏳ ${count} escalade(s) expirée(s) sans réponse. ` +
       `Rien n'a été envoyé.`;
     try {
       await envoyer(groupe, texte);
@@ -44,6 +50,6 @@ export async function expirerEscalades(params: {
     }
   }
 
-  log.info("Escalades expirées", { nombre: depassees.length });
-  return { expirees: depassees.length };
+  log.info("Escalades expirées", { nombre: count });
+  return { expirees: count };
 }

@@ -155,7 +155,7 @@ export async function traiterMessageControle(params: {
       };
     }
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: cible } });
-    return { action: "mode", reponse: `${commande.alias} est maintenant en ${LIBELLE_MODE[cible]}.` };
+    return { action: "mode", reponse: `${commande.alias} passe en mode ${LIBELLE_MODE[cible]}.` };
   }
 
   // À partir d'ici, il ne reste que les quatre commandes qui agissent sur une

@@ -67,12 +67,24 @@ describe("routeur du groupe de contrôle", () => {
     expect(apres?.status).toBe("RESOLVED");
   });
 
-  it("passe le contact en DRAFT sur « 4 », sans jamais l'activer", async () => {
+  it("passe le contact en DRAFT sur « 4 » depuis AUTO", async () => {
     const { contact } = await escaladeOuverte();
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: "AUTO" } });
     await traiterMessageControle({ texte: "4", replyToWaId: "WA-CTRL-1", envoyer: vi.fn() });
     const apres = await prisma.contact.findUnique({ where: { id: contact.id } });
     expect(apres?.mode).toBe("DRAFT");
+  });
+
+  it("ne réactive jamais un contact OFF sur « 4 » (P1) : classe l'escalade sans y toucher", async () => {
+    const { contact, escalade } = await escaladeOuverte();
+    await prisma.contact.update({ where: { id: contact.id }, data: { mode: "OFF" } });
+    const envoyer = vi.fn();
+    await traiterMessageControle({ texte: "4", replyToWaId: "WA-CTRL-1", envoyer });
+    expect(envoyer).not.toHaveBeenCalled();
+    const contactApres = await prisma.contact.findUnique({ where: { id: contact.id } });
+    expect(contactApres?.mode).toBe("OFF");
+    const escaladeApres = await prisma.escalation.findUnique({ where: { id: escalade.id } });
+    expect(escaladeApres?.status).toBe("RESOLVED");
   });
 
   it("refuse une action d'escalade sans réponse native, plutôt que de deviner laquelle", async () => {
@@ -114,6 +126,15 @@ describe("routeur du groupe de contrôle", () => {
     expect(apres?.mode).toBe("OFF");
   });
 
+  it("refuse de réactiver un contact OFF via /mode (P1) : l'existence ne suffit pas", async () => {
+    const { contact } = await escaladeOuverte();
+    await prisma.contact.update({ where: { id: contact.id }, data: { mode: "OFF" } });
+    const r = await traiterMessageControle({ texte: "/mode sarah auto", replyToWaId: null, envoyer: vi.fn() });
+    expect(r.reponse).toMatch(/désactivé|interface/i);
+    const apres = await prisma.contact.findUnique({ where: { id: contact.id } });
+    expect(apres?.mode).toBe("OFF");
+  });
+
   it("répond quelque chose d'utile sur une commande inconnue", async () => {
     const r = await traiterMessageControle({ texte: "/danse", replyToWaId: null, envoyer: vi.fn() });
     expect(r.action).toBe("inconnue");
@@ -125,5 +146,65 @@ describe("routeur du groupe de contrôle", () => {
     expect(r.action).toBe("inconnue");
     expect(r.reponse).not.toMatch(/réponds au message/i);
     expect(r.reponse.length).toBeGreaterThan(0);
+  });
+
+  it("refuse d'agir quand deux escalades partagent le même identifiant de message de contrôle (base corrompue)", async () => {
+    const { escalade: escalade1 } = await escaladeOuverte();
+
+    const contact2 = await prisma.contact.create({
+      data: {
+        jid: "22500000002@s.whatsapp.net", alias: "yasmine", mode: "DRAFT",
+        thread: { create: {} }, policy: { create: {} },
+      },
+      include: { thread: true },
+    });
+    const message2 = await prisma.message.create({
+      data: {
+        threadId: contact2.thread!.id, waMessageId: `M2-${Date.now()}-${Math.random()}`,
+        direction: "IN", source: "HUMAN", text: "tu es dispo demain ?", timestamp: new Date(),
+      },
+    });
+    const decision2 = await prisma.decision.create({
+      data: {
+        messageId: message2.id, contactId: contact2.id, risks: ["ENGAGEMENT"],
+        ruleFired: "risque.engagement.rendez-vous", outcome: "ESCALATED",
+      },
+    });
+
+    // La contrainte `@unique` sur `controlMessageWaId` empêche cette
+    // collision par la voie normale (Prisma comme SQL brut : c'est un index
+    // au niveau de la base). On simule donc une base déjà corrompue — donnée
+    // antérieure à la contrainte, import direct — en désactivant
+    // temporairement l'index le temps de l'insertion : c'est justement ce
+    // cas-là que le routeur doit refuser tout seul, indépendamment de la
+    // contrainte SQL.
+    await prisma.$executeRawUnsafe(`DROP INDEX "Escalation_controlMessageWaId_key"`);
+    let escalade2: { id: string } | null = null;
+    try {
+      escalade2 = await prisma.escalation.create({
+        data: {
+          decisionId: decision2.id, proposedText: "Demain plutôt",
+          controlMessageWaId: "WA-CTRL-1", expiresAt: new Date(Date.now() + 3_600_000),
+        },
+      });
+
+      const envoyer = vi.fn();
+      const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
+      expect(envoyer).not.toHaveBeenCalled();
+      expect(r.reponse).toMatch(/réponds au message/i);
+
+      const apres1 = await prisma.escalation.findUnique({ where: { id: escalade1.id } });
+      expect(apres1?.status).toBe("OPEN");
+    } finally {
+      // La duplication doit disparaître avant de recréer l'index, sinon
+      // Postgres refuse de le reposer — on ne laisse pas le prochain test
+      // hériter d'une base sans la contrainte.
+      if (escalade2) {
+        await prisma.escalation.delete({ where: { id: escalade2.id } });
+      }
+      await prisma.$executeRawUnsafe(
+        `CREATE UNIQUE INDEX "Escalation_controlMessageWaId_key" ON "Escalation"("controlMessageWaId")`,
+      );
+    }
   });
 });

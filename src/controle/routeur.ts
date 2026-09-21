@@ -9,16 +9,47 @@ type Envoyeur = (jid: string, texte: string) => Promise<void>;
 const AIDE_COMMANDE_INCONNUE =
   "Commande non reconnue. 1 envoyer · 2 <texte> · 3 ignorer · 4 pause · /stop · /go · /statut · /qui <alias> · /mode <alias> <auto|draft|off>";
 
+// Remplace un cast `as ContactMode` (interdit en production) par une table de
+// correspondance exhaustive : le typage garantit qu'aucun alias de commande
+// n'échappe à cette table.
+const MODE_PAR_ALIAS: Record<"auto" | "draft" | "off", ContactMode> = {
+  auto: ContactMode.AUTO,
+  draft: ContactMode.DRAFT,
+  off: ContactMode.OFF,
+};
+
+// Les réponses du routeur sont lues sur un téléphone, en français : jamais le
+// nom brut de l'enum Prisma (« DRAFT », « AUTO », « OFF »).
+const LIBELLE_MODE: Record<ContactMode, string> = {
+  [ContactMode.OFF]: "désactivé",
+  [ContactMode.DRAFT]: "brouillon",
+  [ContactMode.AUTO]: "automatique",
+};
+
 async function envoyerParGowa(jid: string, texte: string): Promise<void> {
   await createGowaClient().sendText({ phone: jid, message: texte });
 }
 
 async function escaladeDepuisReponse(replyToWaId: string | null) {
   if (replyToWaId === null) return null;
-  return prisma.escalation.findFirst({
+  const candidats = await prisma.escalation.findMany({
     where: { controlMessageWaId: replyToWaId },
     include: { decision: { include: { contact: true } } },
   });
+  if (candidats.length > 1) {
+    // Deux escalades pour un même message de contrôle : la contrainte
+    // `@unique` sur `controlMessageWaId` empêche ce cas pour toute écriture
+    // faite par ce code, mais une base déjà corrompue (import, réparation
+    // manuelle, migration antérieure à la contrainte) peut encore le
+    // contenir. On ne devine pas laquelle est visée, parce que se tromper
+    // écrit à la mauvaise personne.
+    log.error("Identifiant de message de contrôle ambigu, refus d'agir", {
+      replyToWaId,
+      escaladeIds: candidats.map((e) => e.id),
+    });
+    return null;
+  }
+  return candidats[0] ?? null;
 }
 
 async function basculerPause(valeur: boolean): Promise<void> {
@@ -27,6 +58,37 @@ async function basculerPause(valeur: boolean): Promise<void> {
     create: { id: "singleton", globalPaused: valeur },
     update: { globalPaused: valeur },
   });
+}
+
+async function resoudreApresEnvoi(params: {
+  escaladeId: string;
+  contactId: string;
+  resolution: string;
+  resolvedText: string;
+  messageLog: string;
+}): Promise<void> {
+  try {
+    await prisma.escalation.update({
+      where: { id: params.escaladeId },
+      data: {
+        status: "RESOLVED",
+        resolution: params.resolution,
+        resolvedText: params.resolvedText,
+        resolvedAt: new Date(),
+      },
+    });
+    log.info(params.messageLog, { escaladeId: params.escaladeId, contactId: params.contactId });
+  } catch (erreur) {
+    // Le message est déjà parti (envoyer() a réussi) : cette erreur ne doit
+    // jamais disparaître silencieusement, sans quoi rien ne dit qu'un renvoi
+    // ultérieur de la même escalade expédierait le message une seconde fois.
+    log.error("Message envoyé mais escalade non résolue en base : un nouvel essai renverra le message", {
+      escaladeId: params.escaladeId,
+      contactId: params.contactId,
+      erreur: erreur instanceof Error ? erreur.message : String(erreur),
+    });
+    throw erreur;
+  }
 }
 
 export async function traiterMessageControle(params: {
@@ -68,7 +130,7 @@ export async function traiterMessageControle(params: {
     if (!contact) return { action: "qui", reponse: `Contact « ${commande.alias} » introuvable.` };
     return {
       action: "qui",
-      reponse: `${contact.alias ?? contact.jid} — mode ${contact.mode}, adulte ${contact.isAdult ? "oui" : "non"}.`,
+      reponse: `${contact.alias ?? contact.jid} — mode ${LIBELLE_MODE[contact.mode]}, adulte ${contact.isAdult ? "oui" : "non"}.`,
     };
   }
   if (commande.type === "mode") {
@@ -81,9 +143,19 @@ export async function traiterMessageControle(params: {
         reponse: `Contact « ${commande.alias} » introuvable. L'activation initiale passe par l'interface.`,
       };
     }
-    const cible = commande.mode.toUpperCase() as ContactMode;
+    const cible = MODE_PAR_ALIAS[commande.mode];
+    // P1, second garde-fou : un contact désactivé (OFF) n'est pas réactivable
+    // par commande, qu'il existe ou non. Seule l'interface web fait franchir
+    // ce seuil ; /mode peut en revanche déplacer un contact déjà actif entre
+    // DRAFT et AUTO, ou le désactiver.
+    if (contact.mode === ContactMode.OFF && cible !== ContactMode.OFF) {
+      return {
+        action: "mode",
+        reponse: `${commande.alias} est désactivé. Réactive-le depuis l'interface, pas depuis /mode.`,
+      };
+    }
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: cible } });
-    return { action: "mode", reponse: `${commande.alias} est maintenant en ${cible}.` };
+    return { action: "mode", reponse: `${commande.alias} est maintenant en ${LIBELLE_MODE[cible]}.` };
   }
 
   // À partir d'ici, il ne reste que les quatre commandes qui agissent sur une
@@ -109,21 +181,25 @@ export async function traiterMessageControle(params: {
       return { action: "envoyer", reponse: "Aucune proposition à envoyer. Écris ton texte." };
     }
     await envoyer(contact.jid, escalade.proposedText);
-    await prisma.escalation.update({
-      where: { id: escalade.id },
-      data: { status: "RESOLVED", resolution: "envoyer", resolvedText: escalade.proposedText, resolvedAt: new Date() },
+    await resoudreApresEnvoi({
+      escaladeId: escalade.id,
+      contactId: contact.id,
+      resolution: "envoyer",
+      resolvedText: escalade.proposedText,
+      messageLog: "Escalade résolue par envoi",
     });
-    log.info("Escalade résolue par envoi", { escaladeId: escalade.id, contactId: contact.id });
     return { action: "envoyer", reponse: "Envoyé." };
   }
 
   if (commande.type === "texte") {
     await envoyer(contact.jid, commande.contenu);
-    await prisma.escalation.update({
-      where: { id: escalade.id },
-      data: { status: "RESOLVED", resolution: "texte", resolvedText: commande.contenu, resolvedAt: new Date() },
+    await resoudreApresEnvoi({
+      escaladeId: escalade.id,
+      contactId: contact.id,
+      resolution: "texte",
+      resolvedText: commande.contenu,
+      messageLog: "Escalade résolue par texte personnalisé",
     });
-    log.info("Escalade résolue par texte personnalisé", { escaladeId: escalade.id, contactId: contact.id });
     return { action: "texte", reponse: "Envoyé." };
   }
 
@@ -136,6 +212,19 @@ export async function traiterMessageControle(params: {
   }
 
   if (commande.type === "pause") {
+    // P1, même garde-fou que /mode : un contact déjà OFF ne doit pas être
+    // « activé » vers DRAFT par une réponse d'escalade. On classe l'escalade
+    // sans toucher au mode.
+    if (contact.mode === ContactMode.OFF) {
+      await prisma.escalation.update({
+        where: { id: escalade.id },
+        data: { status: "RESOLVED", resolution: "pause", resolvedAt: new Date() },
+      });
+      return {
+        action: "pause",
+        reponse: `${contact.alias ?? contact.jid} est déjà désactivé, l'escalade est classée sans rien changer.`,
+      };
+    }
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: ContactMode.DRAFT } });
     await prisma.escalation.update({
       where: { id: escalade.id },

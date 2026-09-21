@@ -242,6 +242,10 @@ model ProviderRoute {
 model SystemState {
   id           String  @id @default("singleton")
   globalPaused Boolean @default(false)
+  // Groupe de contrôle choisi depuis l'interface. Prioritaire sur la variable
+  // d'environnement CONTROL_GROUP_JID, qui reste une valeur de repli.
+  controlGroupJid  String?
+  controlGroupName String?
 }
 
 model User {

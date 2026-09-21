@@ -4,6 +4,7 @@ import { verifierSignature } from "@/ingest/signature";
 import { webhookSchema } from "@/ingest/payload";
 import { ingererMessage } from "@/ingest/handler";
 import { log } from "@/lib/log";
+import { lireGroupeDeControle } from "@/controle/groupe";
 
 export const dynamic = "force-dynamic";
 
@@ -45,8 +46,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Résolu à chaque message plutôt qu'au démarrage : un groupe choisi dans
+    // l'interface doit prendre effet tout de suite, sans redéploiement.
+    const groupe = await lireGroupeDeControle();
     const resultat = await ingererMessage(analyse.data, {
-      controlGroupJid: env.CONTROL_GROUP_JID,
+      controlGroupJid: groupe?.jid,
     });
     return NextResponse.json(resultat);
   } catch (erreur) {

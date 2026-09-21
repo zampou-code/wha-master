@@ -55,6 +55,46 @@ export const devicesListSchema = enveloppe(
 
 export const deviceCreateSchema = enveloppe(deviceSchema);
 
+// GET /user/my/groups, vérifié dans la source de GOWA v9.3.1 et de whatsmeow
+// au commit qu'il épingle (9ec8f76db5f1) :
+// - GOWA renvoie `{ data: []types.GroupInfo }` sans aucune transformation ;
+// - `types.GroupInfo` n'a AUCUNE balise JSON, donc les clés sont les noms de
+//   champs Go en PascalCase (`JID`, `Name`, `ParticipantCount`…), et les
+//   structures embarquées (`GroupName`, `GroupParent`, `GroupAnnounce`) sont
+//   aplaties à la racine ;
+// - `JID` se sérialise par `MarshalText`, donc en chaîne (« 120363…@g.us »),
+//   exactement la forme que GOWA met dans le `chat_id` des webhooks
+//   (`evt.Info.Chat.ToNonAD().String()`) : le groupe choisi ici sera reconnu ;
+// - sans aucun groupe, la slice Go reste nulle et GOWA renvoie `data: null`,
+//   même piège que `/devices`.
+const groupeSchema = z.looseObject({
+  JID: z.string(),
+  Name: z.string().optional(),
+  ParticipantCount: z.number().optional(),
+  IsParent: z.boolean().optional(),
+  IsAnnounce: z.boolean().optional(),
+});
+
+export const groupsListSchema = enveloppe(
+  z.looseObject({
+    data: z
+      .array(groupeSchema)
+      .nullable()
+      .transform((liste) => liste ?? []),
+  }),
+);
+
+export type GowaGroupe = {
+  jid: string;
+  nom: string;
+  participants: number | null;
+  // Une communauté (groupe parent) ne reçoit pas de messages ; un groupe en
+  // « annonces seulement » n'accepte que ceux des administrateurs. Ni l'un ni
+  // l'autre ne convient à un échange de commandes.
+  estCommunaute: boolean;
+  annoncesSeulement: boolean;
+};
+
 // Appairage par numéro : GOWA renvoie un code court que l'opérateur saisit
 // dans WhatsApp. Forme vérifiée dans src/ui/rest/app.go (LoginWithCode).
 export const pairCodeSchema = enveloppe(

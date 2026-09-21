@@ -327,3 +327,66 @@ button,
   font-variant-numeric: tabular-nums;
   color: var(--sodium);
 }
+
+/* Réglage du groupe de contrôle. La liste est faite pour le pouce : chaque
+   ligne est une cible pleine largeur, et le rail de gauche — le même dispositif
+   que le bloc d'état — porte la seule information qui compte d'un coup d'œil,
+   à savoir lequel est choisi. Aucune autre couleur n'entre ici. */
+.liste-groupes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.groupe {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  appearance: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: var(--petrole-clair);
+  color: var(--brume);
+  font-family: inherit;
+  font-size: 1rem;
+  min-height: 56px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.groupe[data-actuel] {
+  border-left-color: var(--brume-faible);
+}
+
+.groupe[data-choisi] {
+  border-left-color: var(--sodium);
+  background: #1b323d;
+}
+
+.groupe__nom {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.groupe__detail {
+  color: var(--brume-faible);
+  font-size: 0.85rem;
+}
+
+.confirmation {
+  margin: 0;
+  padding: 12px 16px;
+  border-left: 3px solid var(--sodium);
+  background: var(--petrole-clair);
+  font-size: 0.95rem;
+  max-width: 42ch;
+}
+
+.vide {
+  margin: 0;
+  color: var(--brume-faible);
+  font-size: 0.95rem;
+  max-width: 42ch;
+}

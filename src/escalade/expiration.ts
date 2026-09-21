@@ -1,6 +1,6 @@
-import { getEnv } from "@/config/env";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
+import { lireGroupeDeControle } from "@/controle/groupe";
 import { createGowaClient } from "@/gowa/client";
 import { MARQUEUR_EXPIRATION } from "@/controle/marqueurs";
 
@@ -34,7 +34,7 @@ export async function expirerEscalades(params: {
   });
   if (count === 0) return { expirees: 0 };
 
-  const groupe = getEnv().CONTROL_GROUP_JID;
+  const groupe = (await lireGroupeDeControle())?.jid;
   if (groupe) {
     // Un rappel groupé plutôt qu'un message par escalade : à six heures
     // d'échéance, plusieurs peuvent expirer ensemble, et autant de

@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const queryRaw = vi.fn();
-vi.mock("@/lib/prisma", () => ({ prisma: { $queryRaw: queryRaw } }));
+const lireEtat = vi.fn();
+vi.mock("@/lib/prisma", () => ({
+  prisma: { $queryRaw: queryRaw, systemState: { findUnique: lireEtat } },
+}));
 
 describe("GET /api/health", () => {
   const ancien = process.env.CONTROL_GROUP_JID;
 
   beforeEach(() => {
     queryRaw.mockReset();
+    lireEtat.mockReset();
+    lireEtat.mockResolvedValue(null);
     delete process.env.CONTROL_GROUP_JID;
   });
 
@@ -42,4 +47,11 @@ describe("GET /api/health", () => {
     await expect((await GET()).json()).resolves.toMatchObject({ groupeDeControle: "configuré" });
   });
 
+
+  it("signale le groupe choisi dans l'interface, même sans variable d'environnement", async () => {
+    queryRaw.mockResolvedValue([{ "?column?": 1 }]);
+    lireEtat.mockResolvedValue({ controlGroupJid: "120363000000000000@g.us" });
+    const { GET } = await import("@/app/api/health/route");
+    await expect((await GET()).json()).resolves.toMatchObject({ groupeDeControle: "configuré" });
+  });
 });

@@ -4,7 +4,21 @@
 // commande tapée par l'utilisateur lui-même. Un marqueur en tête de chaque
 // message que le système poste permet au handler de les distinguer sans
 // ambiguïté et de ne jamais les traiter comme des commandes.
-export const MARQUEURS = ["⚠️", "⏳", "✅", "↩️"] as const;
+// Nommés et exportés plutôt que retapés dans chaque fichier : un sélecteur de
+// variante invisible qui divergerait d'un fichier à l'autre suffirait à faire
+// échouer `estMessageSysteme`, et le système traiterait alors ses propres
+// escalades comme des commandes.
+export const MARQUEUR_ESCALADE = "⚠️";
+export const MARQUEUR_EXPIRATION = "⏳";
+export const MARQUEUR_FAIT = "✅";
+export const MARQUEUR_SANS_EFFET = "↩️";
+
+export const MARQUEURS = [
+  MARQUEUR_ESCALADE,
+  MARQUEUR_EXPIRATION,
+  MARQUEUR_FAIT,
+  MARQUEUR_SANS_EFFET,
+] as const;
 
 export function estMessageSysteme(texte: string): boolean {
   const debut = texte.trimStart();

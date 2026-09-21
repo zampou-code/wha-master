@@ -188,4 +188,30 @@ describe("décision et traçage", () => {
     });
     expect(decision?.escalation).toBeNull();
   });
+
+  it("publie une escalade sur un verdict AUTO_SENT : la phase 3a n'envoie jamais seule", async () => {
+    // Sans cette entrée, un contact en mode automatique tombait dans un trou
+    // noir : ni envoi, ni escalade, ni alerte, pendant que la base enregistrait
+    // « envoyé automatiquement ». La personne en face attendait une réponse que
+    // personne n'avait vu passer.
+    process.env.CONTROL_GROUP_JID = "1234-5678@g.us";
+    resetEnvCache();
+    const { contact, message } = await contactAvecMessage(ContactMode.AUTO);
+    const verdict = await deciderEtTracer({
+      messageId: message.id, contactId: contact.id, texte: "coucou ça va ?",
+      typeMedia: null, classifierImpl: classifieurCalme,
+    });
+    // Le moteur rend bien AUTO_SENT...
+    expect(verdict.issue).toBe(DecisionOutcome.AUTO_SENT);
+
+    const decision = await prisma.decision.findUnique({
+      where: { messageId: message.id }, include: { escalation: true },
+    });
+    // ...mais ce qui est arrivé au message, c'est un brouillon soumis à
+    // validation : persister AUTO_SENT serait une affirmation fausse.
+    expect(decision?.outcome).toBe(DecisionOutcome.DRAFTED);
+    expect(decision?.escalation).not.toBeNull();
+    // Le verdict du moteur reste traçable par la règle déclenchée.
+    expect(decision?.ruleFired).toContain("auto");
+  });
 });

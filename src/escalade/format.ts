@@ -1,4 +1,5 @@
 import { RiskCategory } from "@/generated/prisma/client";
+import { MARQUEUR_ESCALADE } from "@/controle/marqueurs";
 
 const LIBELLES: Record<RiskCategory, string> = {
   ENGAGEMENT: "engagement",
@@ -18,8 +19,12 @@ const LIBELLES: Record<RiskCategory, string> = {
 const LONGUEUR_MESSAGE_RECU = 300;
 
 function tronquer(texte: string): string {
-  return texte.length > LONGUEUR_MESSAGE_RECU
-    ? `${texte.slice(0, LONGUEUR_MESSAGE_RECU).trimEnd()}…`
+  // `[...texte]` découpe en points de code : un `slice` sur les unités UTF-16
+  // couperait une paire de substitution en deux et produirait une demi-surrogate
+  // au milieu de l'escalade, sur un message qui se termine par des émojis.
+  const points = [...texte];
+  return points.length > LONGUEUR_MESSAGE_RECU
+    ? `${points.slice(0, LONGUEUR_MESSAGE_RECU).join("").trimEnd()}…`
     : texte;
 }
 
@@ -34,7 +39,7 @@ export function formaterEscalade(params: {
     ? params.risques.map((r) => LIBELLES[r]).join(" + ")
     : "à vérifier";
 
-  const entete = `⚠️ ${params.alias} — ${risques}`;
+  const entete = `${MARQUEUR_ESCALADE} ${params.alias} — ${risques}`;
   const recu = `« ${tronquer(params.messageRecu)} »`;
 
   if (params.proposition !== null) {

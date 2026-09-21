@@ -2,6 +2,7 @@ import { getEnv } from "@/config/env";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
 import { createGowaClient } from "@/gowa/client";
+import { MARQUEUR_EXPIRATION } from "@/controle/marqueurs";
 
 type Envoyeur = (jid: string, texte: string) => Promise<unknown>;
 
@@ -39,7 +40,7 @@ export async function expirerEscalades(params: {
     // d'échéance, plusieurs peuvent expirer ensemble, et autant de
     // notifications rendraient le groupe inutilisable.
     const texte =
-      `⏳ ${count} escalade(s) expirée(s) sans réponse. ` +
+      `${MARQUEUR_EXPIRATION} ${count} escalade(s) expirée(s) sans réponse. ` +
       `Rien n'a été envoyé.`;
     try {
       await envoyer(groupe, texte);

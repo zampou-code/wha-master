@@ -71,4 +71,16 @@ describe("mise en forme d'une escalade", () => {
     expect(texte).toContain("on se voit vendredi ?");
     expect(texte).not.toContain("…");
   });
+
+  it("ne coupe pas un émoji en deux", () => {
+    // `slice` sur les unités UTF-16 couperait une paire de substitution et
+    // produirait une demi-surrogate au milieu de l'escalade.
+    const pave = "😀".repeat(400);
+    const texte = formaterEscalade({
+      alias: "Sarah", risques: [], messageRecu: pave, proposition: "ok", motifRefus: null,
+    });
+    expect(texte).toContain("…");
+    // Aucune moitié de paire de substitution isolée dans la sortie.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(texte)).toBe(false);
+  });
 });

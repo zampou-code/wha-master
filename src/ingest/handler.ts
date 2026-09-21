@@ -5,7 +5,12 @@ import { deciderEtTracer } from "./decision";
 import { detecterTypeMedia, type WebhookMessage } from "./payload";
 import type { classifier } from "@/decision/classifieur";
 import { traiterMessageControle } from "@/controle/routeur";
-import { estMessageSysteme } from "@/controle/marqueurs";
+import {
+  estMessageSysteme,
+  MARQUEUR_ESCALADE,
+  MARQUEUR_FAIT,
+  MARQUEUR_SANS_EFFET,
+} from "@/controle/marqueurs";
 import { createGowaClient } from "@/gowa/client";
 
 type EnvoyeurControle = (jid: string, texte: string) => Promise<{ messageId?: string }>;
@@ -78,7 +83,7 @@ export async function ingererMessage(
       });
       log.info("Commande de contrôle traitée", { action: resultat.action });
 
-      const prefixe = resultat.aboutie ? "✅" : "↩️";
+      const prefixe = resultat.aboutie ? MARQUEUR_FAIT : MARQUEUR_SANS_EFFET;
       const envoyerControle = options.envoyerControle ?? envoyerAuGroupeDeControle;
       try {
         await envoyerControle(options.controlGroupJid, `${prefixe} ${resultat.reponse}`);
@@ -94,6 +99,23 @@ export async function ingererMessage(
       log.error("Commande de contrôle en échec", {
         erreur: erreur instanceof Error ? erreur.message : String(erreur),
       });
+      // Une commande qui échoue en cours de route ne doit pas laisser
+      // l'utilisateur devant un silence : il en déduirait que rien n'a eu lieu
+      // et retaperait « 1 », ce qui enverrait le message une seconde fois —
+      // l'escalade étant restée OPEN avec sa proposition. Le marqueur fait
+      // aussi que cet avertissement ne reviendra pas comme une commande.
+      const envoyerControle = options.envoyerControle ?? envoyerAuGroupeDeControle;
+      try {
+        await envoyerControle(
+          options.controlGroupJid,
+          `${MARQUEUR_ESCALADE} Ta commande n'est pas allée à son terme. Si elle demandait un envoi, ` +
+            "le message est peut-être déjà parti : vérifie la conversation avant de réessayer.",
+        );
+      } catch (secondaire) {
+        log.error("Avertissement d'échec non publié dans le groupe de contrôle", {
+          erreur: secondaire instanceof Error ? secondaire.message : String(secondaire),
+        });
+      }
     }
     return { statut: "groupe_de_controle" };
   }

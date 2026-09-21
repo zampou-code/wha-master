@@ -228,4 +228,91 @@ describe("routeur du groupe de contrôle", () => {
     // Rejeu sur une escalade désormais résolue : plus aucun effet.
     expect((await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer })).aboutie).toBe(false);
   });
+
+  it("n'envoie rien quand la pause globale est active, mais laisse classer", async () => {
+    // Le bouton panique doit tenir des deux côtés du système. Sans ce contrôle,
+    // « /stop » puis « 1 » sur une escalade encore affichée expédiait le message.
+    const { contact } = await escaladeOuverte();
+    const envoyer = vi.fn().mockResolvedValue(undefined);
+    await traiterMessageControle({ texte: "/stop", replyToWaId: null, envoyer });
+
+    const r1 = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
+    expect(envoyer).not.toHaveBeenCalled();
+    expect(r1.reponse).toMatch(/pause globale/i);
+    expect(r1.aboutie).toBe(false);
+
+    const r2 = await traiterMessageControle({ texte: "2 je passe dimanche", replyToWaId: "WA-CTRL-1", envoyer });
+    expect(envoyer).not.toHaveBeenCalled();
+    expect(r2.aboutie).toBe(false);
+
+    // « 3 » et « 4 » n'écrivent à personne : ils restent disponibles pour
+    // classer les escalades en attente pendant la pause.
+    const r3 = await traiterMessageControle({ texte: "3", replyToWaId: "WA-CTRL-1", envoyer });
+    expect(r3.aboutie).toBe(true);
+    expect(envoyer).not.toHaveBeenCalled();
+    expect(contact.mode).toBe("DRAFT");
+  });
+
+  it("n'écrit pas à un contact désactivé depuis la publication de l'escalade (P1)", async () => {
+    // Escalade publiée à 14 h, contact coupé à 15 h, « 1 » tapé à 17 h en
+    // remontant le fil : le message ne doit pas partir.
+    const { contact } = await escaladeOuverte();
+    await prisma.contact.update({ where: { id: contact.id }, data: { mode: "OFF" } });
+    const envoyer = vi.fn().mockResolvedValue(undefined);
+
+    const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
+    expect(envoyer).not.toHaveBeenCalled();
+    expect(r.aboutie).toBe(false);
+    expect(r.reponse).toMatch(/désactivé/i);
+
+    const r2 = await traiterMessageControle({ texte: "2 coucou", replyToWaId: "WA-CTRL-1", envoyer });
+    expect(envoyer).not.toHaveBeenCalled();
+    expect(r2.aboutie).toBe(false);
+  });
+
+  it("dit qu'une escalade a expiré plutôt que de la déclarer résolue", async () => {
+    // Confondre les deux laisse croire qu'un message a été envoyé alors qu'il
+    // ne l'a jamais été et ne le sera jamais.
+    const { escalade } = await escaladeOuverte();
+    await prisma.escalation.update({ where: { id: escalade.id }, data: { status: "EXPIRED" } });
+    const envoyer = vi.fn();
+
+    const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
+    expect(envoyer).not.toHaveBeenCalled();
+    expect(r.action).toBe("expiree");
+    expect(r.reponse).toMatch(/expiré/i);
+    expect(r.reponse).not.toMatch(/résolue/i);
+  });
+
+  it("refuse d'agir quand deux contacts partagent le même alias", async () => {
+    // `findFirst` sans tri en choisissait un au hasard : le cas réel est un
+    // changement de numéro qui laisse deux fiches au même prénom.
+    await escaladeOuverte();
+    const jumeau = await prisma.contact.create({
+      data: { jid: "22500000002@s.whatsapp.net", alias: "sarah", mode: "DRAFT", thread: { create: {} }, policy: { create: {} } },
+    });
+    const envoyer = vi.fn();
+
+    const rMode = await traiterMessageControle({ texte: "/mode sarah auto", replyToWaId: null, envoyer });
+    expect(rMode.aboutie).toBe(false);
+    expect(rMode.reponse).toMatch(/plusieurs contacts/i);
+
+    const rQui = await traiterMessageControle({ texte: "/qui sarah", replyToWaId: null, envoyer });
+    expect(rQui.aboutie).toBe(false);
+
+    // Surtout : aucun mode n'a bougé.
+    const modes = await prisma.contact.findMany({ select: { mode: true } });
+    expect(modes.every((m) => m.mode === "DRAFT")).toBe(true);
+    expect((await prisma.contact.findUnique({ where: { id: jumeau.id } }))?.mode).toBe("DRAFT");
+  });
+
+  it("retrouve un contact quelle que soit la casse de l'alias tapé", async () => {
+    const { contact } = await escaladeOuverte();
+    const envoyer = vi.fn();
+    const r = await traiterMessageControle({ texte: "/qui SARAH", replyToWaId: null, envoyer });
+    expect(r.aboutie).toBe(true);
+    // La réponse nomme ce qui est en base, pas ce que l'utilisateur a tapé :
+    // c'est l'information qui lui permet de repérer une erreur de cible.
+    expect(r.reponse).toContain(contact.alias);
+  });
 });

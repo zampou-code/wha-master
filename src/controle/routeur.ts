@@ -1,4 +1,4 @@
-import { ContactMode } from "@/generated/prisma/client";
+import { ContactMode, type Contact } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
 import { createGowaClient } from "@/gowa/client";
@@ -97,6 +97,33 @@ async function resoudreApresEnvoi(params: {
 // sert pour choisir entre ✅ et ↩️. Un booléen calculé au point de décision ne
 // peut pas se désynchroniser, là où une liste de cas « sans effet » tenue
 // ailleurs finirait par en oublier un.
+// Symétrique de `escaladeDepuisReponse` : `Contact.alias` n'est pas unique en
+// base, et un `findFirst` sans tri rend un contact arbitraire, choisi par le
+// plan d'exécution Postgres. Se tromper ici met le mauvais contact en AUTO, ou
+// répond l'état du mauvais contact — le cas réel étant un changement de numéro
+// qui laisse deux fiches portant le même prénom.
+type ResolutionAlias =
+  | { type: "trouve"; contact: Contact }
+  | { type: "absent" }
+  | { type: "ambigu" };
+
+async function contactParAlias(alias: string): Promise<ResolutionAlias> {
+  const candidats = await prisma.contact.findMany({
+    // `insensitive` : l'utilisateur tape « Sarah » ou « sarah » selon le clavier
+    // de son téléphone, et l'analyseur de commandes ne met pas l'alias en bas
+    // de casse.
+    where: { alias: { equals: alias, mode: "insensitive" } },
+    take: 2,
+  });
+  if (candidats.length === 0) return { type: "absent" };
+  if (candidats.length > 1) return { type: "ambigu" };
+  return { type: "trouve", contact: candidats[0] };
+}
+
+function reponseAliasAmbigu(alias: string): string {
+  return `Plusieurs contacts portent l'alias « ${alias} ». Je n'agis pas au hasard : distingue-les depuis l'interface.`;
+}
+
 export type ResultatControle = { action: string; reponse: string; aboutie: boolean };
 
 export async function traiterMessageControle(params: {
@@ -131,11 +158,14 @@ export async function traiterMessageControle(params: {
     return { action: "statut", reponse: `${actifs} contact(s) actif(s), ${ouvertes} escalade(s) ouverte(s).`, aboutie: true };
   }
   if (commande.type === "qui") {
-    const contact = await prisma.contact.findFirst({
-      where: { alias: commande.alias },
-      include: { policy: true },
-    });
-    if (!contact) return { action: "qui", reponse: `Contact « ${commande.alias} » introuvable.`, aboutie: false };
+    const resolution = await contactParAlias(commande.alias);
+    if (resolution.type === "absent") {
+      return { action: "qui", reponse: `Contact « ${commande.alias} » introuvable.`, aboutie: false };
+    }
+    if (resolution.type === "ambigu") {
+      return { action: "qui", reponse: reponseAliasAmbigu(commande.alias), aboutie: false };
+    }
+    const contact = resolution.contact;
     return {
       action: "qui",
       reponse: `${contact.alias ?? contact.jid} — mode ${LIBELLE_MODE[contact.mode]}, adulte ${contact.isAdult ? "oui" : "non"}.`,
@@ -143,16 +173,20 @@ export async function traiterMessageControle(params: {
     };
   }
   if (commande.type === "mode") {
-    const contact = await prisma.contact.findFirst({ where: { alias: commande.alias } });
+    const resolution = await contactParAlias(commande.alias);
     // P1 : une commande ne crée jamais un contact. L'activation initiale passe
     // obligatoirement par l'interface web.
-    if (!contact) {
+    if (resolution.type === "absent") {
       return {
         action: "mode",
         reponse: `Contact « ${commande.alias} » introuvable. L'activation initiale passe par l'interface.`,
         aboutie: false,
       };
     }
+    if (resolution.type === "ambigu") {
+      return { action: "mode", reponse: reponseAliasAmbigu(commande.alias), aboutie: false };
+    }
+    const contact = resolution.contact;
     const cible = MODE_PAR_ALIAS[commande.mode];
     // P1, second garde-fou : un contact désactivé (OFF) n'est pas réactivable
     // par commande, qu'il existe ou non. Seule l'interface web fait franchir
@@ -161,12 +195,12 @@ export async function traiterMessageControle(params: {
     if (contact.mode === ContactMode.OFF && cible !== ContactMode.OFF) {
       return {
         action: "mode",
-        reponse: `${commande.alias} est désactivé. Réactive-le depuis l'interface, pas depuis /mode.`,
+        reponse: `${contact.alias ?? contact.jid} est désactivé. Réactive-le depuis l'interface, pas depuis /mode.`,
         aboutie: false,
       };
     }
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: cible } });
-    return { action: "mode", reponse: `${commande.alias} passe en mode ${LIBELLE_MODE[cible]}.`, aboutie: true };
+    return { action: "mode", reponse: `${contact.alias ?? contact.jid} passe en mode ${LIBELLE_MODE[cible]}.`, aboutie: true };
   }
 
   // À partir d'ici, il ne reste que les quatre commandes qui agissent sur une
@@ -182,11 +216,50 @@ export async function traiterMessageControle(params: {
       aboutie: false,
     };
   }
+  // « Résolue » et « expirée » ne disent pas la même chose à quelqu'un qui
+  // remonte le fil : résolue = quelqu'un a tranché ; expirée = personne n'a rien
+  // fait et rien n'est parti. Les confondre laisse croire qu'un message a été
+  // envoyé alors qu'il ne l'a jamais été.
+  if (escalade.status === "EXPIRED") {
+    return {
+      action: "expiree",
+      reponse:
+        "Cette escalade a expiré : rien n'a été envoyé, et rien ne le sera. " +
+        "Écris directement à la personne si c'est encore d'actualité.",
+      aboutie: false,
+    };
+  }
   if (escalade.status !== "OPEN") {
     return { action: "deja-resolue", reponse: "Cette escalade est déjà résolue.", aboutie: false };
   }
 
   const contact = escalade.decision.contact;
+
+  if (commande.type === "envoyer" || commande.type === "texte") {
+    // P1, troisième garde-fou, symétrique de ceux de /mode et de « 4 pause » :
+    // une escalade publiée avant la désactivation reste affichée dans le groupe
+    // et reste répondable. Sans ce contrôle, un « 1 » tapé après coup écrit à un
+    // contact que l'utilisateur avait explicitement coupé.
+    if (contact.mode === ContactMode.OFF) {
+      return {
+        action: commande.type,
+        reponse: `${contact.alias ?? contact.jid} a été désactivé depuis cette escalade : rien n'est envoyé. Réactive-le depuis l'interface si c'est voulu.`,
+        aboutie: false,
+      };
+    }
+    // La pause globale doit tenir des deux côtés du système, pas seulement à
+    // l'entrée des messages. Seules les deux commandes qui écrivent à quelqu'un
+    // sont bloquées : « 3 » et « 4 » n'envoient rien et doivent rester
+    // disponibles pour classer les escalades en attente.
+    const etat = await prisma.systemState.findUnique({ where: { id: "singleton" } });
+    if (etat?.globalPaused) {
+      return {
+        action: "pause-globale",
+        reponse: "Pause globale active : rien n'est envoyé. Fais /go d'abord si c'est voulu.",
+        aboutie: false,
+      };
+    }
+  }
 
   if (commande.type === "envoyer") {
     if (!escalade.proposedText) {

@@ -10,7 +10,14 @@ export type Commande =
   | { type: "qui"; alias: string }
   | { type: "inconnue"; brut: string };
 
-const MODES = new Set(["auto", "draft", "off"]);
+const MODES = ["auto", "draft", "off"] as const;
+type ModeAlias = (typeof MODES)[number];
+
+// Garde de type plutôt que cast : `reste[1]` est une chaîne quelconque tapée par
+// l'utilisateur, et l'affirmer conforme au compilateur ne la rend pas conforme.
+function estMode(valeur: string): valeur is ModeAlias {
+  return (MODES as readonly string[]).includes(valeur);
+}
 
 export function analyserCommande(brut: string): Commande {
   const texte = brut.trim();
@@ -26,8 +33,8 @@ export function analyserCommande(brut: string): Commande {
     if ((commande === "qui" || commande === "who") && reste[0]) return { type: "qui", alias: reste[0] };
     if (commande === "mode" && reste.length >= 2) {
       const mode = reste[1].toLowerCase();
-      if (MODES.has(mode)) {
-        return { type: "mode", alias: reste[0], mode: mode as "auto" | "draft" | "off" };
+      if (estMode(mode)) {
+        return { type: "mode", alias: reste[0], mode };
       }
     }
     return { type: "inconnue", brut };

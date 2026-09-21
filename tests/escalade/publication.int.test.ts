@@ -1,8 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { publierEscalade } from "@/escalade/publication";
+import { assemblerContexte } from "@/redacteur/contexte";
 import { resetEnvCache } from "@/config/env";
 import { resetDb } from "../helpers/db";
+
+vi.mock("@/redacteur/contexte", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/redacteur/contexte")>();
+  return { ...original, assemblerContexte: vi.fn(original.assemblerContexte) };
+});
 
 vi.mock("@/redacteur/redacteur", () => ({
   rediger: vi.fn().mockResolvedValue({
@@ -70,6 +76,9 @@ describe("publication d'une escalade", () => {
       decisionId: d.id, contactId: contact.id, messageRecu: "x", risques: [], envoyer,
     });
     const [destinataire] = envoyer.mock.calls[0];
+    // Nommer le groupe, pas seulement « pas le contact » : `not.toBe(contact.jid)`
+    // passait aussi si le code postait vers "" ou vers n'importe qui d'autre.
+    expect(destinataire).toBe("1234-5678@g.us");
     expect(destinataire).not.toBe(contact.jid);
   });
 
@@ -94,5 +103,28 @@ describe("publication d'une escalade", () => {
     const e = await prisma.escalation.findUnique({ where: { id: r!.escaladeId } });
     expect(e?.status).toBe("OPEN");
     expect(e?.controlMessageWaId).toBeNull();
+  });
+
+  it("crée quand même l'escalade si le contexte de rédaction est indisponible", async () => {
+    // Dans l'ordre inverse (rédiger puis créer), une panne d'assemblage faisait
+    // disparaître l'alerte entière alors que la Decision disait ESCALATED : un
+    // message MONEY ou INTIMATE s'évaporait entre la décision et le groupe.
+    process.env.CONTROL_GROUP_JID = "1234-5678@g.us";
+    resetEnvCache();
+    const { contact, decision: d } = await decision();
+    vi.mocked(assemblerContexte).mockRejectedValueOnce(new Error("base injoignable"));
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-CTRL-9" });
+
+    const r = await publierEscalade({
+      decisionId: d.id, contactId: contact.id, messageRecu: "tu peux m'envoyer 50000 F ?",
+      risques: ["MONEY"], envoyer,
+    });
+
+    expect(r).not.toBeNull();
+    const e = await prisma.escalation.findUnique({ where: { id: r!.escaladeId } });
+    expect(e?.status).toBe("OPEN");
+    expect(e?.proposedText).toBeNull();
+    // Et l'utilisateur est prévenu de ce qui manque, plutôt que de ne rien voir.
+    expect(String(envoyer.mock.calls[0][1])).toMatch(/contexte de rédaction/i);
   });
 });

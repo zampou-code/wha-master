@@ -1,3 +1,4 @@
+import { flechi } from "@/decision/regles-lexicales";
 import type { ContexteRedaction } from "./contexte";
 
 export type BrouillonBrut = {
@@ -30,24 +31,28 @@ function normaliser(texte: string): string {
     // qu'en caractères combinants bruts dans le code source, pour rester
     // lisibles à la relecture et ne pas se faire recomposer en NFC par un
     // outil qui normaliserait le fichier lui-même.
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     // Apostrophes et guillemets typographiques : macOS corrige `'` en `’`
     // automatiquement, donc une limite tapée avec l'une et un brouillon
     // produit avec l'autre doivent tout de même se rencontrer.
-    .replace(/[‘’ʼ′]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/œ/g, "oe")
-    .replace(/æ/g, "ae")
+    .replace(/[\u2018\u2019\u02bc\u2032]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/\u0153/g, "oe")
+    .replace(/\u00e6/g, "ae")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 // Vérifie qu'un terme interdit apparaît comme mot entier, pas comme sous-chaîne :
-// sans frontière, un terme comme « prêt » bloquerait « sous prétexte ».
+// sans frontière, un terme comme « prêt » bloquerait « sous prétexte ». `flechi`
+// étend ensuite le terme échappé aux accords français courants (masculin,
+// féminin, singulier, pluriel) : sans lui, un terme interdit « déçu » ne
+// bloque pas « déçue » — l'angle mort qui a déjà coûté plusieurs tours de
+// correction ailleurs dans ce projet.
 function contientMot(texte: string, terme: string): boolean {
   if (terme === "") return false;
   const echappe = terme.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^\\p{L}\\p{N}])${echappe}([^\\p{L}\\p{N}]|$)`, "u").test(texte);
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${flechi(echappe)}([^\\p{L}\\p{N}]|$)`, "u").test(texte);
 }
 
 // P4 en code, pas en consigne. Un modèle peut ignorer une instruction de prompt ;

@@ -96,12 +96,32 @@ describe("validation du brouillon", () => {
     if (!avecGarde.valide) expect(avecGarde.regle).toBe("p4.limite-dure");
   });
 
-  it("ne déclenche pas de faux positif sur une sous-chaîne : « prêt » ne bloque pas « sous prétexte »", () => {
-    const r = validerBrouillon(
-      { reply: "Il a dit ça sous prétexte que j'étais en retard", factsUsed: [], needsFact: null },
-      contexte({ termesInterdits: ["prêt"] }),
-    );
-    expect(r.valide).toBe(true);
+  // F1 : un terme interdit doit bloquer ses formes fléchies (masculin/féminin,
+  // singulier/pluriel), sans quoi « rembourse » n'arrête pas « remboursée » —
+  // l'angle mort qui a déjà coûté plusieurs tours de correction ailleurs dans
+  // ce projet (cf. src/decision/regles-lexicales.ts). L'accord ne doit pas
+  // pour autant rouvrir le faux positif sur une sous-chaîne (« prêt » dans
+  // « sous prétexte »), ni casser l'échappement des caractères spéciaux de
+  // regex dans un terme (« c'est+ »), ni un terme à plusieurs mots.
+  it.each([
+    ["« déçu » bloque la forme fléchie « deçue » (accord féminin)", ["déçu"], "Tu vas être deçue", false],
+    ["« déçu » bloque la forme fléchie « déçus » (pluriel masculin)", ["déçu"], "On dirait qu'ils sont déçus", false],
+    ["« déçu » bloque la forme fléchie « déçues » (pluriel féminin)", ["déçu"], "Elles étaient déçues", false],
+    ["« rembourse » bloque la forme fléchie « remboursée »", ["rembourse"], "Elle a été remboursée hier soir", false],
+    ["« rembourse » bloque la forme fléchie « rembourses »", ["rembourse"], "Tu rembourses quand ?", false],
+    [
+      "« prêt » continue de laisser passer « sous prétexte » : flechi ne rouvre pas le faux positif",
+      ["prêt"],
+      "Il a dit ça sous prétexte que j'étais en retard",
+      true,
+    ],
+    ["« mon adresse » (terme à plusieurs mots) bloque toujours", ["mon adresse"], "Je t'envoie mon adresse tout à l'heure", false],
+    ["« c'est+ » reste échappé : bloque la forme exacte « c'est+ »", ["c'est+"], "c'est+ trop tard, désolé", false],
+    ["« c'est+ » reste échappé : ne bloque pas « c'est » seul", ["c'est+"], "c'est trop tard, désolé", true],
+  ] as const)("%s", (_description, termesInterdits, reply, valideAttendu) => {
+    const r = validerBrouillon({ reply, factsUsed: [], needsFact: null }, contexte({ termesInterdits: [...termesInterdits] }));
+    expect(r.valide).toBe(valideAttendu);
+    if (!r.valide) expect(r.regle).toBe("p4.limite-dure");
   });
 
   it.each([

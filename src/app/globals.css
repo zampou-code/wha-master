@@ -479,3 +479,74 @@ button,
 .bascule input:disabled + span {
   color: var(--brume-faible);
 }
+
+/* Un fait de la fiche : le corps bascule « partageable », la croix supprime.
+   Les deux gestes sont séparés parce qu'ils n'ont pas la même conséquence —
+   l'un retire une information du rédacteur, l'autre l'efface. */
+.fait {
+  display: flex;
+  align-items: stretch;
+  background: var(--petrole-clair);
+  gap: 2px;
+}
+
+.fait__bascule {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  appearance: none;
+  border: 0;
+  border-left: 3px solid var(--brume-faible);
+  background: transparent;
+  color: var(--brume);
+  font-family: inherit;
+  font-size: 1rem;
+  min-height: 56px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.fait__bascule[aria-pressed="true"] {
+  border-left-color: var(--sodium);
+}
+
+.fait__retirer {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--brume-faible);
+  font-family: inherit;
+  font-size: 1rem;
+  min-width: 44px;
+  cursor: pointer;
+}
+
+/* Un rôle et sa cascade de fournisseurs : le titre porte le rôle, la ligne
+   d'aide dit ce qu'il fait concrètement, et l'ordre des entrées est l'ordre
+   d'essai. */
+.role {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-left: 3px solid var(--petrole-clair);
+  padding-left: 14px;
+}
+
+.role__titre {
+  margin: 0;
+  font-weight: 800;
+}
+
+.role__detail {
+  margin: -8px 0 0;
+  color: var(--brume-faible);
+  font-size: 0.85rem;
+}
+
+.paire .fait__retirer {
+  align-self: flex-end;
+  min-height: 44px;
+}

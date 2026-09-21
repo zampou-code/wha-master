@@ -4,155 +4,199 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 type Statut = { isConnected: boolean; isLoggedIn: boolean; jid?: string };
-type GroupeDeControle = { jid: string; nom: string | null; source: "interface" | "environnement" };
-type EtatRail = "verification" | "attente" | "connecte" | "erreur";
+type Etat = {
+  groupeDeControle: { pret: boolean; nom: string | null };
+  persona: { pret: boolean; faitsPartageables: number };
+  redaction: { pret: boolean; fournisseurs: number };
+  classement: { pret: boolean; fournisseurs: number };
+  contacts: { pret: boolean; actifs: number; total: number };
+  escaladesOuvertes: number;
+  pauseGlobale: boolean;
+};
 
 const MESSAGE_RESEAU = "Connexion réseau impossible. Réessaie dans un instant.";
-const MESSAGE_INJOIGNABLE = "WhatsApp ne répond pas. Vérifie le service et réessaie.";
 
 export default function Accueil() {
   const router = useRouter();
   const [statut, setStatut] = useState<Statut | null>(null);
-  const [groupe, setGroupe] = useState<GroupeDeControle | null>(null);
-  const [groupeIllisible, setGroupeIllisible] = useState(false);
+  const [etat, setEtat] = useState<Etat | null>(null);
+  const [etatIllisible, setEtatIllisible] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [chargement, setChargement] = useState(true);
 
-  const verifierLiaison = useCallback(async () => {
+  const verifier = useCallback(async () => {
     setChargement(true);
-    let reponse: Response;
+    let liaison: Response;
     try {
-      reponse = await fetch("/api/whatsapp/status");
+      liaison = await fetch("/api/whatsapp/status");
     } catch {
       setErreur(MESSAGE_RESEAU);
       setChargement(false);
       return;
     }
-    if (reponse.status === 401) {
+    if (liaison.status === 401) {
       router.push("/login");
       return;
     }
-    if (!reponse.ok) {
-      setErreur(MESSAGE_INJOIGNABLE);
+    if (!liaison.ok) {
+      setErreur("WhatsApp ne répond pas. Vérifie le service et réessaie.");
       setChargement(false);
       return;
     }
     setErreur(null);
-    setStatut(await reponse.json());
-    // Le groupe de contrôle est l'autre moitié de l'état du système : sans lui,
-    // l'appareil a beau être relié, rien n'est jamais proposé ni envoyé. Son
-    // absence doit se voir dès l'accueil. Un échec ici ne masque pas la liaison.
-    // Un échec de lecture ne doit pas ressembler à « aucun groupe choisi » :
-    // les deux états mènent à des décisions opposées.
+    setStatut(await liaison.json());
+
+    // Un échec de lecture ne doit pas ressembler à « rien n'est configuré » :
+    // les deux mènent à des décisions opposées.
     try {
-      const reglage = await fetch("/api/controle/groupe");
-      setGroupe(reglage.ok ? ((await reglage.json()) as { groupe: GroupeDeControle | null }).groupe : null);
-      setGroupeIllisible(!reglage.ok);
+      const reponse = await fetch("/api/etat");
+      if (reponse.ok) {
+        setEtat(((await reponse.json()) as { etat: Etat }).etat);
+        setEtatIllisible(false);
+      } else {
+        setEtat(null);
+        setEtatIllisible(true);
+      }
     } catch {
-      setGroupe(null);
-      setGroupeIllisible(true);
+      setEtat(null);
+      setEtatIllisible(true);
     }
     setChargement(false);
   }, [router]);
 
   useEffect(() => {
-    void verifierLiaison();
-  }, [verifierLiaison]);
+    void verifier();
+  }, [verifier]);
 
-  const etat: EtatRail = erreur
-    ? "erreur"
-    : chargement
-      ? "verification"
-      : statut?.isLoggedIn
-        ? "connecte"
-        : "attente";
+  const relie = statut?.isLoggedIn === true;
 
-  const libelle =
-    etat === "erreur"
-      ? "Liaison indisponible"
-      : etat === "verification"
-        ? "Vérification de la liaison"
-        : etat === "connecte"
-          ? "Appareil relié"
-          : "Aucun appareil relié";
+  const etapes = etat
+    ? [
+        {
+          cle: "groupe",
+          titre: etat.groupeDeControle.nom ?? "Groupe de contrôle",
+          pret: etat.groupeDeControle.pret,
+          detail: etat.groupeDeControle.pret
+            ? "Les messages à valider y sont soumis."
+            : "Sans lui, rien ne t'est proposé et rien n'est envoyé.",
+          lien: "/reglages",
+        },
+        {
+          cle: "persona",
+          titre: "Ta fiche",
+          pret: etat.persona.pret,
+          detail: etat.persona.pret
+            ? `${etat.persona.faitsPartageables} fait${etat.persona.faitsPartageables > 1 ? "s" : ""} que le rédacteur peut citer.`
+            : "Le rédacteur n'a rien à dire de toi : il posera la question au lieu de répondre.",
+          lien: "/persona",
+        },
+        {
+          cle: "ia",
+          titre: "Fournisseurs d'IA",
+          pret: etat.redaction.pret,
+          detail: etat.redaction.pret
+            ? etat.classement.pret
+              ? "Rédaction et classement couverts."
+              : "Rédaction couverte, mais aucun classement : tout sera traité comme incertain."
+            : "Tu recevras des alertes sans proposition.",
+          lien: "/fournisseurs",
+        },
+        {
+          cle: "contacts",
+          titre: "Contacts",
+          pret: etat.contacts.pret,
+          detail: etat.contacts.pret
+            ? `${etat.contacts.actifs} actif${etat.contacts.actifs > 1 ? "s" : ""} sur ${etat.contacts.total}.`
+            : `${etat.contacts.total} connu${etat.contacts.total > 1 ? "s" : ""}, aucun activé. C'est le seul endroit qui peut le faire.`,
+          lien: "/contacts",
+        },
+      ]
+    : [];
 
-  const detail =
-    etat === "erreur"
-      ? "Vérifie que le service WhatsApp tourne, puis réessaie."
-      : etat === "verification"
-        ? "Un instant."
-        : etat === "connecte"
-          ? `Cet assistant répond déjà sur WhatsApp${statut?.jid ? ` (${statut.jid})` : ""}.`
-          : "Aucun téléphone n'est relié. Lance l'appairage pour en connecter un.";
+  const restantes = etapes.filter((etape) => !etape.pret).length;
 
   return (
     <main className="ecran">
       <div className="colonne">
         <header className="entete">
-          <h1>Poste de contrôle WhatsApp</h1>
-          <p>Cet assistant répond à ta place sur WhatsApp. Voici l&apos;état de la liaison.</p>
+          <h1>Poste de contrôle</h1>
+          <p>
+            {relie && etat
+              ? restantes === 0
+                ? "Tout est en place. L'assistant te soumet chaque message avant de l'envoyer."
+                : `${restantes} chose${restantes > 1 ? "s" : ""} à régler avant que l'assistant ne propose quoi que ce soit.`
+              : "Cet assistant répond à ta place sur WhatsApp, après ton accord message par message."}
+          </p>
         </header>
 
-        <div className="bloc-etat" data-etat={etat} aria-live="polite">
+        <div
+          className="bloc-etat"
+          data-etat={erreur ? "erreur" : chargement ? "verification" : relie ? "connecte" : "attente"}
+          aria-live="polite"
+        >
           <span className="bloc-etat__indicateur" aria-hidden="true" />
           <div className="bloc-etat__texte">
-            <p className="bloc-etat__libelle">{libelle}</p>
-            <p className="bloc-etat__detail">{detail}</p>
+            <p className="bloc-etat__libelle">
+              {erreur
+                ? "Liaison indisponible"
+                : chargement
+                  ? "Vérification"
+                  : relie
+                    ? "Appareil relié"
+                    : "Aucun appareil relié"}
+            </p>
+            <p className="bloc-etat__detail">
+              {erreur
+                ? "Vérifie que le service WhatsApp tourne, puis réessaie."
+                : chargement
+                  ? "Un instant."
+                  : relie
+                    ? statut?.jid ?? "Connecté."
+                    : "Lance l'appairage pour connecter un téléphone."}
+            </p>
           </div>
         </div>
 
-        {!erreur && !chargement && statut?.isLoggedIn && (
-          <div
-            className="bloc-etat"
-            data-etat={groupeIllisible ? "erreur" : groupe ? "connecte" : "attente"}
-            aria-live="polite"
-          >
-            <span className="bloc-etat__indicateur" aria-hidden="true" />
-            <div className="bloc-etat__texte">
-              <p className="bloc-etat__libelle">
-                {groupeIllisible
-                  ? "Groupe de contrôle indéterminé"
-                  : groupe
-                    ? (groupe.nom ?? "Groupe de contrôle relié")
-                    : "Aucun groupe de contrôle"}
-              </p>
-              <p className="bloc-etat__detail">
-                {groupeIllisible
-                  ? "Le réglage n'a pas pu être lu. Ouvre les réglages pour vérifier."
-                  : groupe
-                    ? "Les messages à valider y sont soumis avant tout envoi."
-                    : "Rien ne te sera proposé tant qu'aucun groupe n'est choisi."}
-              </p>
-            </div>
+        {erreur && <p role="alert" className="alerte">{erreur}</p>}
+
+        {!relie && !chargement && !erreur && (
+          <Link href="/connexion" className="bouton-principal">Lancer l&apos;appairage</Link>
+        )}
+
+        {relie && etat?.pauseGlobale && (
+          <p role="status" className="alerte">
+            Pause globale active : rien ne sera envoyé tant que tu n&apos;auras pas fait /go dans le
+            groupe de contrôle.
+          </p>
+        )}
+
+        {relie && etatIllisible && (
+          <p role="alert" className="alerte">
+            L&apos;état des réglages n&apos;a pas pu être lu. Ce qui suit peut être incomplet.
+          </p>
+        )}
+
+        {relie && etat && (
+          <div className="liste-groupes">
+            {etapes.map((etape) => (
+              <Link key={etape.cle} href={etape.lien} className="groupe" data-choisi={etape.pret ? "" : undefined}>
+                <span className="groupe__nom">{etape.titre}</span>
+                <span className="groupe__detail">{etape.detail}</span>
+              </Link>
+            ))}
+            <Link href="/journal" className="groupe">
+              <span className="groupe__nom">Journal</span>
+              <span className="groupe__detail">
+                {etat.escaladesOuvertes > 0
+                  ? `${etat.escaladesOuvertes} message${etat.escaladesOuvertes > 1 ? "s" : ""} en attente de ta réponse.`
+                  : "Ce que l'assistant a décidé, et pourquoi."}
+              </span>
+            </Link>
           </div>
         )}
 
-        {erreur && <p role="alert" className="alerte">{erreur}</p>}
-
-        {erreur && (
-          <button type="button" className="bouton-secondaire" onClick={() => void verifierLiaison()}>
-            Réessayer
-          </button>
-        )}
-
-        {!erreur && !chargement && (
-          statut?.isLoggedIn ? (
-            <>
-              <Link
-                href="/reglages"
-                className={groupe ? "lien-discret" : "bouton-principal"}
-              >
-                {groupe ? "Changer de groupe de contrôle" : "Choisir le groupe de contrôle"}
-              </Link>
-              <Link href="/connexion" className="lien-discret">
-                Revoir l&apos;appairage
-              </Link>
-            </>
-          ) : (
-            <Link href="/connexion" className="bouton-principal">
-              Lancer l&apos;appairage
-            </Link>
-          )
+        {relie && (
+          <Link href="/connexion" className="lien-discret">Revoir l&apos;appairage</Link>
         )}
       </div>
     </main>

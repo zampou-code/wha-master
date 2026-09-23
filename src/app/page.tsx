@@ -12,6 +12,7 @@ type Etat = {
   contacts: { pret: boolean; actifs: number; total: number };
   escaladesOuvertes: number;
   pauseGlobale: boolean;
+  envois: { enAttente: number; prochainA: string | null; echecs: number };
 };
 
 const MESSAGE_RESEAU = "Connexion réseau impossible. Réessaie dans un instant.";
@@ -161,6 +162,24 @@ export default function Accueil() {
 
         {!relie && !chargement && !erreur && (
           <Link href="/connexion" className="bouton-principal">Lancer l&apos;appairage</Link>
+        )}
+
+        {relie && etat && etat.envois.enAttente > 0 && (
+          <p role="status" className="confirmation">
+            {etat.envois.enAttente} réponse{etat.envois.enAttente > 1 ? "s" : ""} automatique
+            {etat.envois.enAttente > 1 ? "s" : ""} en attente
+            {etat.envois.prochainA && ` — la prochaine vers ${new Date(etat.envois.prochainA)
+              .toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`}
+            . Le délai est volontaire : une réponse instantanée se remarquerait.
+          </p>
+        )}
+
+        {relie && etat && etat.envois.echecs > 0 && (
+          <p role="alert" className="alerte">
+            {etat.envois.echecs} réponse{etat.envois.echecs > 1 ? "s" : ""} automatique
+            {etat.envois.echecs > 1 ? "s n'ont" : " n'a"} pas pu partir après plusieurs tentatives.
+            Regarde le journal.
+          </p>
         )}
 
         {relie && etat?.pauseGlobale && (

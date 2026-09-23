@@ -5,6 +5,7 @@ import { webhookSchema } from "@/ingest/payload";
 import { ingererMessage } from "@/ingest/handler";
 import { log } from "@/lib/log";
 import { lireGroupeDeControle } from "@/controle/groupe";
+import { traiterEnvoisDus } from "@/envoi/file";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,20 @@ export async function POST(request: Request) {
     const resultat = await ingererMessage(analyse.data, {
       controlGroupJid: groupe?.jid,
     });
+
+    // La tâche planifiée tourne toutes les heures : bien trop grossier pour des
+    // délais de 45 secondes à 10 minutes. Un message qui arrive est l'occasion
+    // naturelle d'écouler ce qui est dû. Isolé et borné : ce travail de fond ne
+    // doit ni faire échouer l'ingestion, ni allonger la réponse au point que
+    // GOWA la rejoue.
+    try {
+      await traiterEnvoisDus({ limite: 5 });
+    } catch (erreur) {
+      log.error("File d'envoi non traitée à la réception d'un message", {
+        erreur: erreur instanceof Error ? erreur.message : String(erreur),
+      });
+    }
+
     return NextResponse.json(resultat);
   } catch (erreur) {
     log.error("Échec de l'ingestion", {

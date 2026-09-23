@@ -6,6 +6,7 @@ import { classifier } from "@/decision/classifieur";
 import { decider } from "@/decision/moteur";
 import type { ContexteDecision, SignalRisque, Verdict } from "@/decision/types";
 import { publierEscalade } from "@/escalade/publication";
+import { traiterEnvoiAutonome } from "@/envoi/auto";
 
 const JOUR_MS = 24 * 60 * 60 * 1000;
 
@@ -13,10 +14,12 @@ const JOUR_MS = 24 * 60 * 60 * 1000;
 // validation comme un brouillon. Sans AUTO_SENT dans cet ensemble, un contact
 // en mode automatique tombait dans un trou noir — ni envoi, ni escalade, ni
 // alerte — pendant que la base enregistrait « envoyé automatiquement ».
+// AUTO_SENT n'est plus de la partie : il a son propre chemin, qui planifie un
+// envoi et ne retombe sur l'escalade que si le rédacteur ne produit rien de
+// valide. Le laisser ici escaladerait tout deux fois.
 const PRODUIT_UNE_ESCALADE: ReadonlySet<DecisionOutcome> = new Set([
   DecisionOutcome.ESCALATED,
   DecisionOutcome.DRAFTED,
-  DecisionOutcome.AUTO_SENT,
 ]);
 
 export async function deciderEtTracer(params: {
@@ -126,11 +129,11 @@ export async function deciderEtTracer(params: {
   // P5 : la décision est tracée quelle qu'en soit l'issue, y compris IGNORED.
   const risquesUniques = [...new Set(verdict.risques)] as RiskCategory[];
 
-  // Le moteur dit AUTO_SENT, mais rien n'envoie seul en phase 3a : ce qui arrive
-  // réellement au message, c'est un brouillon soumis à validation. Persister
-  // AUTO_SENT serait une affirmation fausse, qui survivrait à la phase.
-  // `ruleFired` garde la trace du verdict d'origine (`table.auto`).
-  const issueEffective =
+  // Le moteur peut dire AUTO_SENT sans que rien ne parte : le rédacteur doit
+  // d'abord produire un brouillon que la validation accepte. On persiste donc
+  // d'abord l'issue la plus prudente, et on ne l'élève à AUTO_SENT qu'une fois
+  // l'envoi réellement planifié. `ruleFired` garde le verdict d'origine.
+  const issueProvisoire =
     verdict.issue === DecisionOutcome.AUTO_SENT ? DecisionOutcome.DRAFTED : verdict.issue;
   const decisionCreee = await prisma.decision.create({
     data: {
@@ -138,7 +141,7 @@ export async function deciderEtTracer(params: {
       contactId: contact.id,
       risks: risquesUniques,
       ruleFired: verdict.regle,
-      outcome: issueEffective,
+      outcome: issueProvisoire,
       classifierProvider: fournisseur,
       latencyMs,
       costUsd: coutUsd,
@@ -150,7 +153,7 @@ export async function deciderEtTracer(params: {
   log.info("Décision prise", {
     contactId: contact.id,
     messageId: params.messageId,
-    issue: issueEffective,
+    issue: issueProvisoire,
     verdictMoteur: verdict.issue,
     regle: verdict.regle,
     risques: risquesUniques,
@@ -158,7 +161,29 @@ export async function deciderEtTracer(params: {
     latencyMs,
   });
 
-  if (PRODUIT_UNE_ESCALADE.has(verdict.issue)) {
+  if (verdict.issue === DecisionOutcome.AUTO_SENT) {
+    try {
+      const issue = await traiterEnvoiAutonome({
+        decisionId: decisionCreee.id,
+        contactId: contact.id,
+        messageRecu: params.texte ?? "(message non textuel)",
+        risques: risquesUniques,
+      });
+      if (issue.planifie) {
+        // Élevée seulement maintenant : un envoi est réellement inscrit dans la
+        // file. S'il est annulé plus tard, la file en garde la trace.
+        await prisma.decision.update({
+          where: { id: decisionCreee.id },
+          data: { outcome: DecisionOutcome.AUTO_SENT },
+        });
+      }
+    } catch (erreur) {
+      log.error("Chemin autonome en échec", {
+        decisionId: decisionCreee.id,
+        erreur: erreur instanceof Error ? erreur.message : String(erreur),
+      });
+    }
+  } else if (PRODUIT_UNE_ESCALADE.has(verdict.issue)) {
     try {
       await publierEscalade({
         decisionId: decisionCreee.id,

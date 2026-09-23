@@ -58,6 +58,13 @@ enum DecisionOutcome {
   EXPIRED
 }
 
+enum StatutEnvoi {
+  EN_ATTENTE
+  ENVOYE
+  ANNULE
+  ECHEC
+}
+
 enum EscalationStatus {
   OPEN
   RESOLVED
@@ -87,6 +94,7 @@ model Contact {
   thread  Thread?
   profile ContactProfile?
   decisions Decision[]
+  envois    EnvoiPlanifie[]
 }
 
 model ContactPolicy {
@@ -200,6 +208,7 @@ model Decision {
   createdAt          DateTime        @default(now())
 
   escalation Escalation?
+  envoi      EnvoiPlanifie?
 
   @@index([contactId, createdAt])
 }
@@ -326,4 +335,28 @@ model TwoFactor {
   @@index([secret])
   @@index([userId])
   @@map("twoFactor")
+}
+
+// File d'envoi durable. Une minuterie en mémoire ne survivrait pas à un
+// redéploiement : un message promis disparaîtrait sans que personne le sache.
+// Les conditions sont donc revérifiées au moment d'envoyer, pas seulement au
+// moment de planifier — le contact peut avoir été désactivé entre les deux.
+model EnvoiPlanifie {
+  id         String      @id @default(cuid())
+  contactId  String
+  contact    Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  decisionId String?     @unique
+  decision   Decision?   @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+
+  texte          String
+  source         MessageSource @default(AUTO)
+  aEnvoyerApres  DateTime
+  statut         StatutEnvoi   @default(EN_ATTENTE)
+  tentatives     Int           @default(0)
+  dernierEchec   String?
+  waMessageId    String?
+  envoyeA        DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([statut, aEnvoyerApres])
 }

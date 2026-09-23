@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-type Kind = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "OPENAI_COMPATIBLE" | "OLLAMA";
+type Kind = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "KIMI" | "OPENAI_COMPATIBLE" | "OLLAMA";
 type Fournisseur = {
   id: string;
   name: string;
@@ -16,12 +16,34 @@ type Fournisseur = {
 type EntreeRole = { providerId: string; model: string };
 type Reglages = { fournisseurs: Fournisseur[]; roles: Record<string, EntreeRole[]> };
 
-const KINDS: { valeur: Kind; libelle: string; adresseRequise: boolean }[] = [
-  { valeur: "ANTHROPIC", libelle: "Anthropic", adresseRequise: false },
-  { valeur: "OPENAI", libelle: "OpenAI", adresseRequise: false },
-  { valeur: "GOOGLE", libelle: "Google", adresseRequise: false },
-  { valeur: "OPENAI_COMPATIBLE", libelle: "Compatible OpenAI (OpenRouter, Kimi…)", adresseRequise: true },
-  { valeur: "OLLAMA", libelle: "Ollama (local)", adresseRequise: true },
+type TypeFournisseur = {
+  valeur: Kind;
+  libelle: string;
+  adresseRequise: boolean;
+  // Pré-remplie quand elle est connue : une adresse à retaper de mémoire est
+  // une faute d'inattention qui ne se voit qu'au premier appel raté.
+  adresseParDefaut?: string;
+  modeleExemple: string;
+};
+
+const KINDS: TypeFournisseur[] = [
+  { valeur: "ANTHROPIC", libelle: "Anthropic", adresseRequise: false, modeleExemple: "claude-sonnet-5" },
+  { valeur: "OPENAI", libelle: "OpenAI", adresseRequise: false, modeleExemple: "gpt-5" },
+  { valeur: "GOOGLE", libelle: "Google", adresseRequise: false, modeleExemple: "gemini-2.5-pro" },
+  {
+    valeur: "KIMI",
+    libelle: "Kimi (Moonshot)",
+    adresseRequise: false,
+    adresseParDefaut: "https://api.moonshot.ai/v1",
+    modeleExemple: "kimi-k2-0905-preview",
+  },
+  {
+    valeur: "OPENAI_COMPATIBLE",
+    libelle: "Compatible OpenAI (OpenRouter, autre…)",
+    adresseRequise: true,
+    modeleExemple: "openai/gpt-4o-mini",
+  },
+  { valeur: "OLLAMA", libelle: "Ollama (local)", adresseRequise: true, modeleExemple: "llama3.1" },
 ];
 
 const ROLES: { cle: string; titre: string; detail: string }[] = [
@@ -230,14 +252,17 @@ export default function Fournisseurs() {
               ))}
             </select>
           </label>
-          {typeChoisi?.adresseRequise && (
+          {(typeChoisi?.adresseRequise || typeChoisi?.adresseParDefaut) && (
             <label className="champ">
-              <span>Adresse de base</span>
+              <span>
+                Adresse de base
+                {typeChoisi?.adresseParDefaut && " — laisse vide pour l'adresse habituelle"}
+              </span>
               <input
                 type="url"
                 value={adresse}
                 onChange={(e) => setAdresse(e.target.value)}
-                placeholder="https://openrouter.ai/api/v1"
+                placeholder={typeChoisi?.adresseParDefaut ?? "https://openrouter.ai/api/v1"}
               />
             </label>
           )}
@@ -300,7 +325,13 @@ export default function Fournisseurs() {
                       type="text"
                       value={entree.model}
                       onChange={(e) => changerRole(role.cle, index, { model: e.target.value })}
-                      placeholder="claude-sonnet-5"
+                      placeholder={
+                        KINDS.find(
+                          (k) =>
+                            k.valeur ===
+                            reglages.fournisseurs.find((f) => f.id === entree.providerId)?.kind,
+                        )?.modeleExemple ?? "claude-sonnet-5"
+                      }
                     />
                   </label>
                   <button

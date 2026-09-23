@@ -9,6 +9,7 @@ import {
   FournisseurRefuseError,
 } from "@/fournisseurs/service";
 import { resoudreRoute } from "@/ia/registre";
+import { modelePour } from "@/ia/fournisseurs";
 import { resetDb } from "../helpers/db";
 
 const CLE = "sk-ant-secrete-0123456789";
@@ -140,5 +141,53 @@ describe("service des fournisseurs", () => {
     await enregistrerRoles({ compose: [{ providerId: fournisseur.id, model: "b" }] });
     expect(await prisma.providerRoute.count()).toBe(1);
     expect((await lireReglages()).roles.compose[0].model).toBe("b");
+  });
+
+  it("accepte Kimi sans exiger son adresse de base", async () => {
+    // C'est tout l'intérêt de lui donner son propre nom : ne plus avoir à
+    // retaper une adresse de mémoire.
+    const reglages = await enregistrerFournisseur({
+      name: "Kimi", kind: ProviderKind.KIMI, apiKey: "sk-kimi-123", enabled: true,
+    });
+    expect(reglages.fournisseurs[0].kind).toBe(ProviderKind.KIMI);
+    expect(reglages.fournisseurs[0].baseUrl).toBeNull();
+  });
+
+  it("laisse viser un autre point d'entrée Kimi si on le précise", async () => {
+    const reglages = await enregistrerFournisseur({
+      name: "Kimi Chine", kind: ProviderKind.KIMI,
+      baseUrl: "https://api.moonshot.cn/v1", apiKey: "sk-kimi-123", enabled: true,
+    });
+    expect(reglages.fournisseurs[0].baseUrl).toBe("https://api.moonshot.cn/v1");
+  });
+
+  it("rend un modèle Kimi réellement utilisable par le moteur", async () => {
+    // Le vrai test : le fournisseur enregistré ici doit produire un client que
+    // la couche IA sait instancier, adresse par défaut comprise.
+    const reglages = await enregistrerFournisseur({
+      name: "Kimi", kind: ProviderKind.KIMI, apiKey: "sk-kimi-123", enabled: true,
+    });
+    await enregistrerRoles({
+      compose: [{ providerId: reglages.fournisseurs[0].id, model: "kimi-k2-0905-preview" }],
+    });
+
+    const entrees = await resoudreRoute("compose");
+    expect(entrees).toHaveLength(1);
+    expect(entrees[0].kind).toBe(ProviderKind.KIMI);
+    expect(entrees[0].baseUrl).toBeNull();
+    // `modelePour` lève si quoi que ce soit manque : qu'il rende un modèle
+    // prouve que l'adresse par défaut a bien été appliquée.
+    expect(() => modelePour(entrees[0])).not.toThrow();
+  });
+
+  it("refuse un Kimi sans clé plutôt que d'échouer au premier appel", async () => {
+    const reglages = await enregistrerFournisseur({
+      name: "Kimi nu", kind: ProviderKind.KIMI, apiKey: null, enabled: true,
+    });
+    await enregistrerRoles({
+      compose: [{ providerId: reglages.fournisseurs[0].id, model: "kimi-k2-0905-preview" }],
+    });
+    const entrees = await resoudreRoute("compose");
+    expect(() => modelePour(entrees[0])).toThrow(/Clé absente/);
   });
 });

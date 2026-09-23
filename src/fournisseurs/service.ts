@@ -120,6 +120,9 @@ export async function enregistrerFournisseur(params: {
       throw new FournisseurRefuseError("Ce type de fournisseur exige une adresse de base.");
     }
   }
+  // Kimi n'en exige pas : son adresse est connue et sert de valeur par défaut.
+  // La laisser vide est le cas courant ; la renseigner vise un autre point
+  // d'entrée, celui de Chine par exemple.
 
   // Une clé vide ne veut pas dire « efface la clé » : c'est le cas normal d'une
   // modification où l'on ne retape pas un secret qu'on ne peut plus lire.

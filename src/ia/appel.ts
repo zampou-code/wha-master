@@ -6,9 +6,23 @@ import { modelePour } from "./fournisseurs";
 import { resoudreRoute, type EntreeRoute, type RoleIA } from "./registre";
 
 export class AucunFournisseurError extends Error {
-  constructor(role: RoleIA, tentatives: number) {
-    super(`Aucun fournisseur IA n'a répondu pour le rôle ${role} (${tentatives} tentatives)`);
+  /**
+   * La dernière erreur réellement rencontrée, déjà expurgée des secrets.
+   *
+   * Sans elle, une route mal configurée — un identifiant de modèle qui
+   * n'existe pas, par exemple — se manifestait par « le rédacteur est
+   * indisponible », sans jamais dire pourquoi. La cause ne vivait que dans les
+   * journaux du serveur, que personne ne lit depuis un téléphone.
+   */
+  readonly derniereErreur: string | null;
+
+  constructor(role: RoleIA, tentatives: number, derniereErreur: string | null = null) {
+    super(
+      `Aucun fournisseur IA n'a répondu pour le rôle ${role} (${tentatives} tentatives)` +
+        (derniereErreur ? ` : ${derniereErreur}` : ""),
+    );
     this.name = "AucunFournisseurError";
+    this.derniereErreur = derniereErreur;
   }
 }
 
@@ -30,6 +44,29 @@ const TENTATIVES_PAR_ENTREE = 2;
 // sans ce réglage à 0, le pire cas réel montait à TENTATIVES_PAR_ENTREE x 3 = six
 // requêtes par entrée de route pour une spec qui n'en annonce que deux.
 const RETRIES_SDK = 0;
+
+/**
+ * Consigne l'état d'un fournisseur sur sa fiche.
+ *
+ * La page des fournisseurs affichait « dernière erreur enregistrée » pour un
+ * champ que rien n'écrivait jamais : une promesse que le code ne tenait pas.
+ * L'écriture est tolérante à l'échec — savoir qu'un fournisseur va mal ne doit
+ * pas empêcher d'essayer le suivant.
+ */
+async function noterSante(providerId: string, erreur: string | null): Promise<void> {
+  try {
+    const { prisma } = await import("@/lib/prisma");
+    await prisma.providerConfig.update({
+      where: { id: providerId },
+      data: erreur === null
+        ? { healthyAt: new Date(), lastError: null }
+        : { lastError: erreur.slice(0, 500) },
+    });
+  } catch {
+    // Les tests injectent des entrées sans fiche en base, et une panne de base
+    // ne doit pas transformer un appel réussi en échec.
+  }
+}
 
 // Délai maximal accordé à un appel de classification avant abandon. La route
 // est configurable par l'utilisateur — y compris un `baseUrl` Ollama mort —
@@ -88,6 +125,7 @@ export async function appelerStructure<T>(params: {
   }
 
   let tentatives = 0;
+  let derniereErreur: string | null = null;
   for (const entree of entrees) {
     for (let essai = 1; essai <= TENTATIVES_PAR_ENTREE; essai++) {
       tentatives++;
@@ -104,6 +142,7 @@ export async function appelerStructure<T>(params: {
           abortSignal: AbortSignal.timeout(DELAI_MAX_MS),
         } as Parameters<GenererObjet>[0]);
 
+        await noterSante(entree.providerId, null);
         return {
           valeur: reponse.object as T,
           fournisseur: entree.nom,
@@ -113,6 +152,8 @@ export async function appelerStructure<T>(params: {
         };
       } catch (erreur) {
         const message = assainir(erreur instanceof Error ? erreur.message : String(erreur), entrees);
+        derniereErreur = `${entree.nom} / ${entree.model} — ${message}`;
+        await noterSante(entree.providerId, message);
         log.warn("Échec d'un fournisseur IA", {
           role: params.role,
           fournisseur: entree.nom,
@@ -124,5 +165,5 @@ export async function appelerStructure<T>(params: {
     }
   }
 
-  throw new AucunFournisseurError(params.role, tentatives);
+  throw new AucunFournisseurError(params.role, tentatives, derniereErreur);
 }

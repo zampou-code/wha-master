@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { appelerStructure } from "@/ia/appel";
+import { appelerStructure, AucunFournisseurError } from "@/ia/appel";
 import { log } from "@/lib/log";
 import type { ContexteRedaction } from "./contexte";
 import { validerBrouillon } from "./validation";
@@ -84,9 +84,15 @@ export async function rediger(params: {
     log.error("Rédacteur indisponible", {
       erreur: erreur instanceof Error ? erreur.message : String(erreur),
     });
+    // La cause précise accompagne le refus : « indisponible » tout court
+    // n'apprend rien à quelqu'un qui lit ça sur son téléphone, alors qu'un
+    // modèle inconnu ou une clé refusée se corrigent en trente secondes.
+    const cause = erreur instanceof AucunFournisseurError ? erreur.derniereErreur : null;
     return {
       brouillon: null,
-      motifRefus: "Le rédacteur est indisponible.",
+      motifRefus: cause
+        ? `Le rédacteur est indisponible : ${cause}`
+        : "Le rédacteur est indisponible.",
       regleRefus: "redacteur.indisponible",
       fournisseur: null,
       latencyMs: null,

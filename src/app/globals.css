@@ -571,3 +571,17 @@ button,
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* « Tester » vit à côté de la croix de suppression : même famille de gestes
+   secondaires, mais celui-ci ne détruit rien. */
+.fait__tester {
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--petrole);
+  background: transparent;
+  color: var(--brume-faible);
+  font-family: inherit;
+  font-size: 0.85rem;
+  min-width: 64px;
+  cursor: pointer;
+}

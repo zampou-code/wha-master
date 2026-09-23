@@ -157,6 +157,8 @@ export default function Fournisseurs() {
   const [succes, setSucces] = useState<string | null>(null);
   const [chargement, setChargement] = useState(true);
   const [envoi, setEnvoi] = useState(false);
+  const [tests, setTests] = useState<Record<string, string>>({});
+  const [testEnCours, setTestEnCours] = useState<string | null>(null);
 
   const charger = useCallback(async () => {
     setChargement(true);
@@ -221,6 +223,43 @@ export default function Fournisseurs() {
     },
     [router],
   );
+
+  const tester = async (fournisseur: Fournisseur) => {
+    // On teste avec le modèle recommandé, ou le premier de la liste : c'est
+    // celui que l'utilisateur va choisir dans la foulée.
+    const modele =
+      modeleRecommande(fournisseur.kind, "classify") ?? modelesPour(fournisseur.kind)[0]?.id ?? "";
+    if (!modele) {
+      setTests((t) => ({ ...t, [fournisseur.id]: "Choisis d'abord un modèle dans un rôle." }));
+      return;
+    }
+    setTestEnCours(fournisseur.id);
+    setTests((t) => ({ ...t, [fournisseur.id]: "" }));
+    try {
+      const reponse = await fetch("/api/fournisseurs/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: fournisseur.id, model: modele }),
+      });
+      if (reponse.status === 401) {
+        router.push("/login");
+        return;
+      }
+      const corps = (await reponse.json().catch(() => null)) as
+        | { ok?: boolean; latencyMs?: number; erreur?: string }
+        | null;
+      setTests((t) => ({
+        ...t,
+        [fournisseur.id]: corps?.ok
+          ? `✅ ${modele} répond en ${corps.latencyMs} ms.`
+          : `❌ ${corps?.erreur ?? "échec sans détail"}`,
+      }));
+    } catch {
+      setTests((t) => ({ ...t, [fournisseur.id]: `❌ ${MESSAGE_RESEAU}` }));
+    } finally {
+      setTestEnCours(null);
+    }
+  };
 
   if (chargement || !reglages) {
     return (
@@ -313,8 +352,16 @@ export default function Fournisseurs() {
                     <span className="groupe__detail">
                       {fournisseur.enabled ? "actif" : "désactivé"}
                       {fournisseur.cleMasquee ? ` · clé ${fournisseur.cleMasquee}` : " · aucune clé"}
-                      {fournisseur.lastError ? " · dernière erreur enregistrée" : ""}
+                      {fournisseur.lastError ? ` · dernier échec : ${fournisseur.lastError}` : ""}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="fait__tester"
+                    disabled={testEnCours !== null}
+                    onClick={() => void tester(fournisseur)}
+                  >
+                    {testEnCours === fournisseur.id ? "…" : "Tester"}
                   </button>
                   <button
                     type="button"
@@ -330,6 +377,13 @@ export default function Fournisseurs() {
                 </div>
               ))}
             </div>
+          )}
+          {reglages.fournisseurs.map((fournisseur) =>
+            tests[fournisseur.id] ? (
+              <p key={`test-${fournisseur.id}`} role="status" className="champ__aide">
+                {fournisseur.name} : {tests[fournisseur.id]}
+              </p>
+            ) : null,
           )}
         </section>
 

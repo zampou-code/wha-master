@@ -35,6 +35,41 @@ async function entreesDeLaRoute(routeId: string | null, role: RoleIA) {
   return analyse.data[role] ?? [];
 }
 
+/**
+ * Construit une entrée de route à partir d'une fiche de fournisseur.
+ *
+ * Extrait de la résolution pour que le test d'un fournisseur emprunte
+ * exactement le même chemin qu'un appel réel — clé déchiffrée comprise. Un
+ * test qui passerait par un autre chemin ne prouverait rien.
+ */
+export function entreeDepuisConfig(
+  config: {
+    id: string;
+    name: string;
+    kind: ProviderKind;
+    baseUrl: string | null;
+    apiKeyEncrypted: string | null;
+  },
+  model: string,
+): EntreeRoute | null {
+  let apiKey: string | null = null;
+  if (config.apiKeyEncrypted) {
+    try {
+      apiKey = decryptSecret(config.apiKeyEncrypted, getEnv().MASTER_KEY);
+    } catch {
+      return null;
+    }
+  }
+  return {
+    providerId: config.id,
+    nom: config.name,
+    kind: config.kind,
+    model,
+    baseUrl: config.baseUrl,
+    apiKey,
+  };
+}
+
 export async function resoudreRoute(
   role: RoleIA,
   options: { contactId?: string } = {},

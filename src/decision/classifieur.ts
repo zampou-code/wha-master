@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { RiskCategory } from "@/generated/prisma/client";
-import { appelerStructure } from "@/ia/appel";
+import { appelerStructure, AucunFournisseurError } from "@/ia/appel";
 import { log } from "@/lib/log";
 import type { SignalRisque } from "./types";
 
@@ -97,6 +97,11 @@ export async function classifier(params: {
     log.error("Classifieur indisponible, repli en incertitude", {
       erreur: erreur instanceof Error ? erreur.message : String(erreur),
     });
-    return replierEnIncertitude("Classifieur indisponible : escalade par précaution.");
+    const cause = erreur instanceof AucunFournisseurError ? erreur.derniereErreur : null;
+    return replierEnIncertitude(
+      cause
+        ? `Classifieur indisponible (${cause}) : escalade par précaution.`
+        : "Classifieur indisponible : escalade par précaution.",
+    );
   }
 }

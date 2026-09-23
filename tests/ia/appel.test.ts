@@ -148,4 +148,37 @@ describe("appel IA avec repli", () => {
     expect(erreur).toBeInstanceOf(AucunFournisseurError);
     expect(erreur?.message).not.toContain("sk-tres-secret");
   });
+
+  it("porte la cause réelle du dernier échec, pas seulement « indisponible »", async () => {
+    // Un identifiant de modèle qui n'existe pas se manifestait par « le
+    // rédacteur est indisponible », sans jamais dire pourquoi. La cause ne
+    // vivait que dans les journaux du serveur, que personne ne lit depuis un
+    // téléphone.
+    const generer = vi.fn().mockRejectedValue(new Error("model not found: kimi-k2-0905-preview"));
+    await expect(
+      appelerStructure({
+        role: "compose", schema, systeme: "s", invite: "i",
+        entrees: [entree("Kimi", "kimi-k2-0905-preview")], generer,
+      }),
+    ).rejects.toMatchObject({
+      name: "AucunFournisseurError",
+      derniereErreur: expect.stringContaining("model not found"),
+    });
+  });
+
+  it("nomme le fournisseur et le modèle fautifs dans la cause", async () => {
+    const generer = vi.fn().mockRejectedValue(new Error("401 unauthorized"));
+    try {
+      await appelerStructure({
+        role: "compose", schema, systeme: "s", invite: "i",
+        entrees: [entree("Kimi", "kimi-k2.6")], generer,
+      });
+      throw new Error("aurait dû lever");
+    } catch (erreur) {
+      const cause = (erreur as { derniereErreur: string | null }).derniereErreur ?? "";
+      expect(cause).toContain("Kimi");
+      expect(cause).toContain("kimi-k2.6");
+      expect(cause).toContain("401");
+    }
+  });
 });

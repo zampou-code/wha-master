@@ -27,6 +27,13 @@ const TENTATIVES_MAX = 3;
  * Les heures de silence restent hors de cette requête : elles exigent une zone
  * horaire et une plage qui passe minuit, et leur enjeu est un report, pas un
  * envoi interdit.
+ *
+ * Le plafond est écrit en NOT EXISTS d'une violation, et non en EXISTS d'une
+ * permission : un contact sans politique ni fil — cas d'un import, ou d'une
+ * fiche créée hors du chemin d'ingestion — n'a aucune ligne à trouver, et un
+ * EXISTS bloquait alors tous ses envois en silence, comptés comme annulés sans
+ * raison lisible. Chercher la violation laisse passer l'absence de donnée, ce
+ * qui correspond aux valeurs par défaut du schéma.
  */
 async function reserverAtomiquement(envoiId: string, maintenant: Date): Promise<number> {
   return prisma.$executeRaw`
@@ -43,10 +50,10 @@ async function reserverAtomiquement(envoiId: string, maintenant: Date): Promise<
         JOIN "Decision" d ON d.id = es."decisionId"
         WHERE es.status = 'OPEN' AND d."contactId" = e."contactId"
       )
-      AND EXISTS (
+      AND NOT EXISTS (
         SELECT 1 FROM "Thread" t
         JOIN "ContactPolicy" p ON p."contactId" = e."contactId"
-        WHERE t."contactId" = e."contactId" AND t."autoStreak" < p."maxAutoStreak"
+        WHERE t."contactId" = e."contactId" AND t."autoStreak" >= p."maxAutoStreak"
       )`;
 }
 

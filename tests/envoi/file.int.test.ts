@@ -270,4 +270,79 @@ describe("file d'envoi", () => {
     expect(fil?.autoStreak).toBe(1);
     expect(await prisma.message.count({ where: { direction: "OUT" } })).toBe(1);
   });
+
+  // Chaque condition de la réservation SQL, éprouvée dans les deux sens. Une
+  // condition mal écrite ne plante pas : un EXISTS qui ne trouve jamais rien
+  // bloque tout en silence, un NOT EXISTS inversé laisse tout passer. Les cas
+  // qui doivent PASSER comptent donc autant que ceux qui doivent bloquer.
+  const conditions: [string, "ENVOYE" | "BLOQUE", (id: string) => Promise<void>][] = [
+    ["contact repassé OFF", "BLOQUE", async (id) => {
+      await prisma.contact.update({ where: { id }, data: { mode: ContactMode.OFF } });
+    }],
+    ["contact repassé DRAFT", "BLOQUE", async (id) => {
+      await prisma.contact.update({ where: { id }, data: { mode: ContactMode.DRAFT } });
+    }],
+    ["pause globale active", "BLOQUE", async () => {
+      await prisma.systemState.create({ data: { id: "singleton", globalPaused: true } });
+    }],
+    ["pause globale présente mais levée", "ENVOYE", async () => {
+      await prisma.systemState.create({ data: { id: "singleton", globalPaused: false } });
+    }],
+    ["plafond atteint", "BLOQUE", async (id) => {
+      await prisma.thread.update({ where: { contactId: id }, data: { autoStreak: 6 } });
+    }],
+    ["juste sous le plafond", "ENVOYE", async (id) => {
+      await prisma.thread.update({ where: { contactId: id }, data: { autoStreak: 5 } });
+    }],
+    ["escalade ouverte sur ce contact", "BLOQUE", async (id) => {
+      await escaladeSur(id, "OPEN");
+    }],
+    ["escalade déjà résolue", "ENVOYE", async (id) => {
+      await escaladeSur(id, "RESOLVED");
+    }],
+    ["escalade ouverte d'un autre contact", "ENVOYE", async () => {
+      const autre = await prisma.contact.create({
+        data: { jid: "autre@s.whatsapp.net", thread: { create: {} }, policy: { create: {} } },
+      });
+      await escaladeSur(autre.id, "OPEN");
+    }],
+  ];
+
+  it.each(conditions)("réservation — %s", async (_nom, attendu, preparer) => {
+    const c = await contact();
+    await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
+    await preparer(c.id);
+    const { envoyer, presence } = simulacres();
+    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    expect(envoyer.mock.calls.length > 0 ? "ENVOYE" : "BLOQUE").toBe(attendu);
+  });
+
+  it("n'est pas bloqué par un contact sans politique ni fil", async () => {
+    // Un import, ou une fiche créée hors du chemin d'ingestion, n'a aucune
+    // ligne à trouver : une condition écrite en « permission » bloquait alors
+    // tous ses envois en silence.
+    const sansRien = await prisma.contact.create({
+      data: { jid: "nu@s.whatsapp.net", mode: ContactMode.AUTO },
+    });
+    await planifierEnvoi({ contactId: sansRien.id, texte: "coucou", maintenant: midi, alea: () => 0 });
+    const { envoyer, presence } = simulacres();
+    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    expect(envoyer).toHaveBeenCalledTimes(1);
+  });
 });
+
+async function escaladeSur(contactId: string, statut: "OPEN" | "RESOLVED") {
+  const fil = await prisma.thread.findUnique({ where: { contactId } });
+  const message = await prisma.message.create({
+    data: {
+      threadId: fil!.id, waMessageId: `M-${Math.random()}`, direction: "IN",
+      source: "HUMAN", text: "x", timestamp: new Date(),
+    },
+  });
+  const decision = await prisma.decision.create({
+    data: { messageId: message.id, contactId, risks: [], ruleFired: "r", outcome: "ESCALATED" },
+  });
+  await prisma.escalation.create({
+    data: { decisionId: decision.id, status: statut, expiresAt: new Date(Date.now() + 3_600_000) },
+  });
+}

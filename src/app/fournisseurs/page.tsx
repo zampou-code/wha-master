@@ -2,6 +2,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  modelesPour,
+  modeleRecommande,
+  POURQUOI_RECOMMANDE,
+  type RoleModele,
+} from "@/fournisseurs/modeles";
 
 type Kind = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "KIMI" | "OPENAI_COMPATIBLE" | "OLLAMA";
 type Fournisseur = {
@@ -54,6 +60,91 @@ const ROLES: { cle: string; titre: string; detail: string }[] = [
 ];
 
 const MESSAGE_RESEAU = "Connexion réseau impossible. Réessaie dans un instant.";
+
+/**
+ * Choix du modèle : une liste quand on connaît les modèles du fournisseur, la
+ * saisie libre sinon — et toujours en secours, parce que ces listes périment.
+ */
+function ChoixModele({
+  kind,
+  role,
+  valeur,
+  onChange,
+}: {
+  kind?: Kind;
+  role: string;
+  valeur: string;
+  onChange: (model: string) => void;
+}) {
+  const connus = kind ? modelesPour(kind) : [];
+  const recommande = kind ? modeleRecommande(kind, role as RoleModele) : null;
+  const dansLaListe = connus.some((modele) => modele.id === valeur);
+  // « Autre » reste sélectionné tant qu'on y a mis quelque chose, pour ne pas
+  // renvoyer l'utilisateur dans la liste à chaque frappe.
+  const [libre, setLibre] = useState(valeur !== "" && !dansLaListe);
+
+  const choisi = connus.find((modele) => modele.id === valeur);
+
+  if (connus.length === 0 || libre) {
+    return (
+      <label className="champ">
+        <span>
+          Modèle
+          {connus.length > 0 && (
+            <button type="button" className="lien-inline" onClick={() => setLibre(false)}>
+              revenir à la liste
+            </button>
+          )}
+        </span>
+        <input
+          type="text"
+          value={valeur}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="identifiant exact du modèle"
+        />
+        {connus.length === 0 && (
+          <span className="champ__aide">
+            Je ne connais pas les modèles de ce fournisseur : copie l&apos;identifiant depuis sa
+            documentation.
+          </span>
+        )}
+      </label>
+    );
+  }
+
+  return (
+    <label className="champ">
+      <span>Modèle</span>
+      <select
+        value={dansLaListe ? valeur : ""}
+        onChange={(e) => {
+          if (e.target.value === "__autre__") {
+            setLibre(true);
+            onChange("");
+            return;
+          }
+          onChange(e.target.value);
+        }}
+      >
+        <option value="" disabled>Choisis un modèle</option>
+        {connus.map((modele) => (
+          <option key={modele.id} value={modele.id}>
+            {modele.libelle}
+            {modele.id === recommande ? " — recommandé" : ""}
+          </option>
+        ))}
+        <option value="__autre__">Autre (saisir l&apos;identifiant)</option>
+      </select>
+      <span className="champ__aide">
+        {choisi
+          ? choisi.note
+          : recommande
+            ? `Recommandé ici : ${connus.find((m) => m.id === recommande)?.libelle ?? recommande} — ${POURQUOI_RECOMMANDE[role as RoleModele]}.`
+            : ""}
+      </span>
+    </label>
+  );
+}
 
 export default function Fournisseurs() {
   const router = useRouter();
@@ -152,7 +243,11 @@ export default function Fournisseurs() {
     setReglages({ ...reglages, roles: { ...reglages.roles, [role]: entrees } });
   };
   const ajouterEntree = (role: string) => {
-    const entrees = [...(reglages.roles[role] ?? []), { providerId: reglages.fournisseurs[0]?.id ?? "", model: "" }];
+    // Pré-rempli avec le modèle conseillé : le cas courant ne demande alors
+    // aucun choix, et ce qui s'affiche est déjà un réglage valide.
+    const premier = reglages.fournisseurs[0];
+    const conseille = premier ? modeleRecommande(premier.kind, role as RoleModele) : null;
+    const entrees = [...(reglages.roles[role] ?? []), { providerId: premier?.id ?? "", model: conseille ?? "" }];
     setReglages({ ...reglages, roles: { ...reglages.roles, [role]: entrees } });
   };
   const retirerEntree = (role: string, index: number) => {
@@ -319,21 +414,12 @@ export default function Fournisseurs() {
                       ))}
                     </select>
                   </label>
-                  <label className="champ">
-                    <span>Modèle</span>
-                    <input
-                      type="text"
-                      value={entree.model}
-                      onChange={(e) => changerRole(role.cle, index, { model: e.target.value })}
-                      placeholder={
-                        KINDS.find(
-                          (k) =>
-                            k.valeur ===
-                            reglages.fournisseurs.find((f) => f.id === entree.providerId)?.kind,
-                        )?.modeleExemple ?? "claude-sonnet-5"
-                      }
-                    />
-                  </label>
+                  <ChoixModele
+                    kind={reglages.fournisseurs.find((f) => f.id === entree.providerId)?.kind}
+                    role={role.cle}
+                    valeur={entree.model}
+                    onChange={(model) => changerRole(role.cle, index, { model })}
+                  />
                   <button
                     type="button"
                     className="fait__retirer"

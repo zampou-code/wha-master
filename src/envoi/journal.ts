@@ -1,4 +1,4 @@
-import { MessageSource } from "@/generated/prisma/client";
+import { MessageSource, Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
 
@@ -24,7 +24,9 @@ export type EnvoiAConsigner = {
  * `autoStreak` n'était pas écrit non plus, ce qui rendait le garde-fou
  * « plafond de messages automatiques » structurellement inerte.
  */
-export async function consignerEnvoi(envoi: EnvoiAConsigner): Promise<{ messageId: string } | null> {
+export async function consignerEnvoi(
+  envoi: EnvoiAConsigner,
+): Promise<{ messageId: string; nouveau: boolean } | null> {
   const fil = await prisma.thread.findUnique({ where: { contactId: envoi.contactId } });
   if (!fil) {
     log.error("Envoi consigné sans fil : le message est parti mais ne sera pas retrouvé", {
@@ -39,20 +41,43 @@ export async function consignerEnvoi(envoi: EnvoiAConsigner): Promise<{ messageI
   // WhatsApp ne rend pas d'identifiant.
   const waMessageId = envoi.waMessageId ?? `local-${fil.id}-${maintenant.getTime()}`;
 
-  const message = await prisma.message.upsert({
+  // Un `upsert` incrémenterait le compteur à chaque rejeu, y compris quand
+  // aucune ligne n'est créée : le plafond de messages automatiques avancerait
+  // sans qu'aucun message nouveau ne soit parti. On distingue donc explicitement
+  // la création du rejeu.
+  const dejaConsigne = await prisma.message.findUnique({
     where: { waMessageId },
-    create: {
-      threadId: fil.id,
-      waMessageId,
-      direction: "OUT",
-      source: envoi.source,
-      text: envoi.texte,
-      timestamp: maintenant,
-    },
-    update: {},
     select: { id: true },
   });
+  if (dejaConsigne) {
+    return { messageId: dejaConsigne.id, nouveau: false };
+  }
 
+  let message: { id: string };
+  try {
+    message = await prisma.message.create({
+      data: {
+        threadId: fil.id,
+        waMessageId,
+        direction: "OUT",
+        source: envoi.source,
+        text: envoi.texte,
+        timestamp: maintenant,
+      },
+      select: { id: true },
+    });
+  } catch (erreur) {
+    // Deux consignations simultanées du même envoi : la seconde perd la course
+    // sur la contrainte d'unicité. Ce n'est pas une anomalie, c'est le rejeu.
+    if (erreur instanceof Prisma.PrismaClientKnownRequestError && erreur.code === "P2002") {
+      const concurrent = await prisma.message.findUnique({
+        where: { waMessageId },
+        select: { id: true },
+      });
+      if (concurrent) return { messageId: concurrent.id, nouveau: false };
+    }
+    throw erreur;
+  }
 
   await prisma.thread.update({
     where: { id: fil.id },
@@ -65,5 +90,5 @@ export async function consignerEnvoi(envoi: EnvoiAConsigner): Promise<{ messageI
     },
   });
 
-  return { messageId: message.id };
+  return { messageId: message.id, nouveau: true };
 }

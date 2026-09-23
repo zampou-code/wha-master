@@ -19,6 +19,68 @@ async function presenceParGowa(jid: string, action: "start" | "stop"): Promise<v
 const TENTATIVES_MAX = 3;
 
 /**
+ * Réserve un envoi en revérifiant tous les garde-fous dans la même instruction.
+ *
+ * Prisma ne sait pas filtrer sur des relations dans un `updateMany`, et deux
+ * étapes séparées — lire puis réserver — laissent une fenêtre où l'état change.
+ * D'où le SQL : la condition et la prise de possession sont indivisibles.
+ * Les heures de silence restent hors de cette requête : elles exigent une zone
+ * horaire et une plage qui passe minuit, et leur enjeu est un report, pas un
+ * envoi interdit.
+ */
+async function reserverAtomiquement(envoiId: string, maintenant: Date): Promise<number> {
+  return prisma.$executeRaw`
+    UPDATE "EnvoiPlanifie" e
+    SET statut = 'ENVOYE', "envoyeA" = ${maintenant}, tentatives = e.tentatives + 1
+    WHERE e.id = ${envoiId}
+      AND e.statut = 'EN_ATTENTE'
+      AND EXISTS (SELECT 1 FROM "Contact" c WHERE c.id = e."contactId" AND c.mode = 'AUTO')
+      AND NOT EXISTS (
+        SELECT 1 FROM "SystemState" s WHERE s.id = 'singleton' AND s."globalPaused" = true
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM "Escalation" es
+        JOIN "Decision" d ON d.id = es."decisionId"
+        WHERE es.status = 'OPEN' AND d."contactId" = e."contactId"
+      )
+      AND EXISTS (
+        SELECT 1 FROM "Thread" t
+        JOIN "ContactPolicy" p ON p."contactId" = e."contactId"
+        WHERE t."contactId" = e."contactId" AND t."autoStreak" < p."maxAutoStreak"
+      )`;
+}
+
+/** Remet en file après un échec d'envoi — rien n'est parti, le rejeu est sûr. */
+async function remettreEnFile(
+  envoiId: string,
+  tentatives: number,
+  maintenant: Date,
+  erreur: unknown,
+): Promise<void> {
+  const message = erreur instanceof Error ? erreur.message : String(erreur);
+  try {
+    await prisma.envoiPlanifie.update({
+      where: { id: envoiId },
+      data: {
+        // Au-delà de trois tentatives on s'arrête plutôt que de harceler.
+        statut: tentatives >= TENTATIVES_MAX ? StatutEnvoi.ECHEC : StatutEnvoi.EN_ATTENTE,
+        aEnvoyerApres: new Date(maintenant.getTime() + 5 * 60_000),
+        envoyeA: null,
+        dernierEchec: message,
+      },
+    });
+  } catch (secondaire) {
+    // Sans ce filet, l'exception sortait de la boucle et abandonnait en silence
+    // tous les envois suivants du lot.
+    log.error("Envoi ni parti ni remis en file", {
+      envoiId,
+      erreur: secondaire instanceof Error ? secondaire.message : String(secondaire),
+    });
+  }
+  log.error("Envoi automatique en échec", { envoiId, tentatives, erreur: message });
+}
+
+/**
  * Inscrit un envoi dans la file, à l'heure que le planificateur décide.
  *
  * Rien ne part ici : on écrit seulement l'intention. Les conditions seront
@@ -135,11 +197,16 @@ export async function traiterEnvoisDus(params: {
   maintenant?: Date;
   envoyer?: Envoyeur;
   presence?: Presence;
+  // Injectable pour les tests : c'est le seul moyen d'éprouver le chemin
+  // « message parti, consignation en panne », qui est précisément celui où un
+  // renvoi ferait recevoir deux fois la même phrase.
+  consigner?: typeof consignerEnvoi;
   limite?: number;
 } = {}): Promise<{ envoyes: number; annules: number; reportes: number }> {
   const maintenant = params.maintenant ?? new Date();
   const envoyer = params.envoyer ?? envoyerParGowa;
   const presence = params.presence ?? presenceParGowa;
+  const consigner = params.consigner ?? consignerEnvoi;
 
   const dus = await prisma.envoiPlanifie.findMany({
     where: { statut: StatutEnvoi.EN_ATTENTE, aEnvoyerApres: { lte: maintenant } },
@@ -174,22 +241,37 @@ export async function traiterEnvoisDus(params: {
       continue;
     }
 
-    // `updateMany` conditionnel plutôt qu'un `update` : deux exécutions
-    // simultanées de la tâche ne doivent pas envoyer le même message deux fois.
-    const reserve = await prisma.envoiPlanifie.updateMany({
-      where: { id: envoi.id, statut: StatutEnvoi.EN_ATTENTE },
-      data: { statut: StatutEnvoi.ENVOYE, envoyeA: maintenant, tentatives: { increment: 1 } },
-    });
-    if (reserve.count === 0) continue;
+    // La réservation revérifie les garde-fous DANS la même instruction. Les
+    // vérifier avant puis réserver laissait une fenêtre — plusieurs allers-retours
+    // vers la base — pendant laquelle le propriétaire pouvait désactiver le
+    // contact ou une escalade s'ouvrir, sans que l'envoi soit rattrapé.
+    const reserve = await reserverAtomiquement(envoi.id, maintenant);
+    if (reserve === 0) {
+      log.info("Envoi non réservé : une condition a changé au dernier instant", { envoiId: envoi.id });
+      annules += 1;
+      continue;
+    }
 
+    let resultat: { messageId?: string };
     try {
       // L'indicateur de frappe avant l'envoi : sans lui, une réponse tombe du
       // ciel sans que rien ne l'annonce, ce qui se remarque.
       await presence(envoi.contact.jid, "start").catch(() => undefined);
-      const resultat = await envoyer(envoi.contact.jid, envoi.texte);
+      resultat = await envoyer(envoi.contact.jid, envoi.texte);
       await presence(envoi.contact.jid, "stop").catch(() => undefined);
+    } catch (erreur) {
+      // Rien n'est parti : on peut sans risque remettre en file.
+      await remettreEnFile(envoi.id, envoi.tentatives + 1, maintenant, erreur);
+      continue;
+    }
 
-      await consignerEnvoi({
+    // À partir d'ici, le message EST chez le contact. Plus aucun échec ne doit
+    // le remettre en file : le renvoyer ferait recevoir deux fois la même
+    // phrase à quelqu'un qui n'attend rien. On consigne au mieux, et on crie
+    // fort si on n'y arrive pas.
+    envoyes += 1;
+    try {
+      await consigner({
         contactId: envoi.contactId,
         texte: envoi.texte,
         waMessageId: resultat?.messageId,
@@ -199,23 +281,22 @@ export async function traiterEnvoisDus(params: {
         where: { id: envoi.id },
         data: { waMessageId: resultat?.messageId ?? null },
       });
-      envoyes += 1;
       log.info("Message envoyé automatiquement", { contactId: envoi.contactId, envoiId: envoi.id });
     } catch (erreur) {
-      const message = erreur instanceof Error ? erreur.message : String(erreur);
-      const tentatives = envoi.tentatives + 1;
-      // Remis en attente tant qu'il reste des tentatives : l'échec d'envoi est
-      // le plus souvent passager. Au-delà, on s'arrête plutôt que de harceler.
-      await prisma.envoiPlanifie.update({
-        where: { id: envoi.id },
-        data: {
-          statut: tentatives >= TENTATIVES_MAX ? StatutEnvoi.ECHEC : StatutEnvoi.EN_ATTENTE,
-          aEnvoyerApres: new Date(maintenant.getTime() + 5 * 60_000),
-          envoyeA: null,
-          dernierEchec: message,
+      log.error(
+        "Message parti mais non consigné : il n'apparaîtra pas dans le fil et ne comptera pas dans le plafond",
+        {
+          envoiId: envoi.id,
+          contactId: envoi.contactId,
+          waMessageId: resultat?.messageId,
+          erreur: erreur instanceof Error ? erreur.message : String(erreur),
         },
-      });
-      log.error("Envoi automatique en échec", { envoiId: envoi.id, tentatives, erreur: message });
+      );
+      // Tracé sur la ligne elle-même quand c'est possible, pour que l'état soit
+      // lisible en base au lieu de ne vivre que dans un journal.
+      await prisma.envoiPlanifie
+        .update({ where: { id: envoi.id }, data: { dernierEchec: "envoyé mais non consigné" } })
+        .catch(() => undefined);
     }
   }
 

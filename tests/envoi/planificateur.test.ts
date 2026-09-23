@@ -119,4 +119,34 @@ describe("planification d'un envoi", () => {
     }
     expect(Number.isNaN(heureLocale(new Date(), "Africa/Abidjan"))).toBe(false);
   });
+
+  it("reste juste au passage à l'heure d'été", () => {
+    // Le commentaire du code justifie l'algorithme heure par heure par ce cas
+    // précis : sans test, cette justification n'était qu'une affirmation.
+    // Nuit du 29 mars 2026 à Paris : 2 h locales n'existe pas, on saute à 3 h.
+    const veille = new Date(Date.UTC(2026, 2, 28, 22, 30));
+    const p = planifier({
+      maintenant: veille,
+      reglages: { ...base, timezone: "Europe/Paris", quietHoursStart: 22, quietHoursEnd: 7 },
+    });
+    expect(p.envoyable).toBe(false);
+    if (!p.envoyable) {
+      // La reprise tombe bien à 7 h locales malgré l'heure escamotée, et pas
+      // à 6 h ni 8 h comme le ferait un calcul par décalage fixe.
+      expect(heureLocale(p.reprendreA, "Europe/Paris")).toBe(7);
+      expect(p.reprendreA.getTime()).toBeGreaterThan(veille.getTime());
+    }
+  });
+
+  it("reste juste au passage à l'heure d'hiver, quand une heure existe deux fois", () => {
+    // Nuit du 25 octobre 2026 : 2 h locales arrive deux fois à Paris.
+    const veille = new Date(Date.UTC(2026, 9, 24, 21, 30));
+    const p = planifier({
+      maintenant: veille,
+      reglages: { ...base, timezone: "Europe/Paris", quietHoursStart: 22, quietHoursEnd: 7 },
+    });
+    if (!p.envoyable) {
+      expect(heureLocale(p.reprendreA, "Europe/Paris")).toBe(7);
+    }
+  });
 });

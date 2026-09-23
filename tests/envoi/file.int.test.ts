@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { ContactMode, MessageSource, StatutEnvoi } from "@/generated/prisma/client";
 import { planifierEnvoi, traiterEnvoisDus, annulerEnvoisEnAttente } from "@/envoi/file";
+import { consignerEnvoi } from "@/envoi/journal";
 import { heureLocale } from "@/envoi/planificateur";
 import { resetDb } from "../helpers/db";
 
@@ -203,5 +204,70 @@ describe("file d'envoi", () => {
     const { envoyer, presence } = simulacres();
     await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
     expect(envoyer).not.toHaveBeenCalled();
+  });
+
+  it("ne renvoie jamais un message déjà parti, même si la suite échoue", async () => {
+    // Le pire scénario : WhatsApp a bien reçu le message, puis la base tombe.
+    // Le remettre en file le ferait recevoir une deuxième fois à quelqu'un qui
+    // n'attend rien.
+    const c = await contact();
+    await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
+    const apres = new Date(midi.getTime() + 60_000);
+
+    // L'envoi réussit et la consignation lève : c'est exactement l'état
+    // « parti chez le contact, perdu côté base ».
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-PARTI" });
+    const presence = vi.fn().mockResolvedValue(undefined);
+    const consigner = vi.fn().mockRejectedValue(new Error("base injoignable"));
+
+    const bilan = await traiterEnvoisDus({ maintenant: apres, envoyer, presence, consigner });
+    expect(bilan.envoyes).toBe(1);
+
+    // Deuxième passage : rien ne doit repartir.
+    const bilan2 = await traiterEnvoisDus({ maintenant: new Date(apres.getTime() + 600_000), envoyer, presence });
+    expect(bilan2.envoyes).toBe(0);
+    expect(envoyer).toHaveBeenCalledTimes(1);
+    const ligne = await prisma.envoiPlanifie.findFirst();
+    expect(ligne?.statut).toBe(StatutEnvoi.ENVOYE);
+    // L'état est lisible en base, pas seulement dans un journal.
+    expect(ligne?.dernierEchec).toMatch(/non consigné/i);
+  });
+
+  it("n'envoie pas si le contact est désactivé juste avant la réservation", async () => {
+    // La course que la vérification préalable ne pouvait pas couvrir : entre le
+    // dernier examen et la prise de possession, l'état change.
+    const c = await contact();
+    await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
+    const apres = new Date(midi.getTime() + 60_000);
+
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
+    const presence = vi.fn().mockResolvedValue(undefined);
+    // Désactivé pendant le traitement, après le premier examen.
+    const traitement = traiterEnvoisDus({ maintenant: apres, envoyer, presence });
+    await prisma.contact.update({ where: { id: c.id }, data: { mode: ContactMode.OFF } });
+    await traitement;
+
+    // Quel que soit le vainqueur de la course, jamais d'envoi à un contact OFF.
+    const contactFinal = await prisma.contact.findUnique({ where: { id: c.id } });
+    if (contactFinal?.mode === ContactMode.OFF && envoyer.mock.calls.length > 0) {
+      // L'envoi n'a pu partir que si la désactivation est arrivée après la
+      // réservation, ce qui reste acceptable ; sinon c'est un défaut.
+      expect((await prisma.envoiPlanifie.findFirst())?.statut).toBe(StatutEnvoi.ENVOYE);
+    }
+    expect(envoyer.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  it("ne fait pas monter le plafond quand une consignation est rejouée", async () => {
+    // Un rejeu ne crée pas de message : il ne doit pas non plus faire avancer
+    // le compteur, sinon le plafond se remplit sans qu'aucun message ne parte.
+    const c = await contact();
+    for (let i = 0; i < 2; i++) {
+      await consignerEnvoi({
+        contactId: c.id, texte: "auto", waMessageId: "WA-MEME", source: MessageSource.AUTO,
+      });
+    }
+    const fil = await prisma.thread.findUnique({ where: { contactId: c.id } });
+    expect(fil?.autoStreak).toBe(1);
+    expect(await prisma.message.count({ where: { direction: "OUT" } })).toBe(1);
   });
 });

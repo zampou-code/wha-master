@@ -1,10 +1,13 @@
-import { ContactMode, type Contact } from "@/generated/prisma/client";
+import { ContactMode, MessageSource, type Contact } from "@/generated/prisma/client";
+import { consignerEnvoi } from "@/envoi/journal";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
 import { createGowaClient } from "@/gowa/client";
 import { analyserCommande, type Commande } from "./commandes";
 
-type Envoyeur = (jid: string, texte: string) => Promise<void>;
+// Rend l'identifiant du message envoyé : sans lui, l'envoi ne pouvait pas être
+// consigné, et le rédacteur ne voyait jamais ce qu'il venait de faire envoyer.
+type Envoyeur = (jid: string, texte: string) => Promise<{ messageId?: string }>;
 
 const AIDE_COMMANDE_INCONNUE =
   "Commande non reconnue. 1 envoyer · 2 <texte> · 3 ignorer · 4 pause · /stop · /go · /statut · /qui <alias> · /mode <alias> <auto|draft|off>";
@@ -26,8 +29,8 @@ const LIBELLE_MODE: Record<ContactMode, string> = {
   [ContactMode.AUTO]: "automatique",
 };
 
-async function envoyerParGowa(jid: string, texte: string): Promise<void> {
-  await createGowaClient().sendText({ phone: jid, message: texte });
+async function envoyerParGowa(jid: string, texte: string): Promise<{ messageId?: string }> {
+  return createGowaClient().sendText({ phone: jid, message: texte });
 }
 
 async function escaladeDepuisReponse(replyToWaId: string | null) {
@@ -265,7 +268,15 @@ export async function traiterMessageControle(params: {
     if (!escalade.proposedText) {
       return { action: "envoyer", reponse: "Aucune proposition à envoyer. Écris ton texte.", aboutie: false };
     }
-    await envoyer(contact.jid, escalade.proposedText);
+    const envoye = await envoyer(contact.jid, escalade.proposedText);
+    // Consigné avant la résolution : si la base tombe entre les deux, mieux
+    // vaut un message tracé et une escalade encore ouverte que l'inverse.
+    await consignerEnvoi({
+      contactId: contact.id,
+      texte: escalade.proposedText,
+      waMessageId: envoye?.messageId,
+      source: MessageSource.HUMAN,
+    });
     await resoudreApresEnvoi({
       escaladeId: escalade.id,
       contactId: contact.id,
@@ -277,7 +288,13 @@ export async function traiterMessageControle(params: {
   }
 
   if (commande.type === "texte") {
-    await envoyer(contact.jid, commande.contenu);
+    const envoye = await envoyer(contact.jid, commande.contenu);
+    await consignerEnvoi({
+      contactId: contact.id,
+      texte: commande.contenu,
+      waMessageId: envoye?.messageId,
+      source: MessageSource.HUMAN,
+    });
     await resoudreApresEnvoi({
       escaladeId: escalade.id,
       contactId: contact.id,

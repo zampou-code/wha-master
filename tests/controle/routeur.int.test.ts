@@ -34,7 +34,7 @@ describe("routeur du groupe de contrôle", () => {
 
   it("envoie la proposition au contact sur « 1 » et résout l'escalade", async () => {
     const { contact, escalade } = await escaladeOuverte();
-    const envoyer = vi.fn().mockResolvedValue(undefined);
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).toHaveBeenCalledWith(contact.jid, "Vendredi ça me va");
     expect(r.action).toBe("envoyer");
@@ -45,14 +45,14 @@ describe("routeur du groupe de contrôle", () => {
 
   it("envoie le texte de l'utilisateur plutôt que la proposition", async () => {
     const { contact } = await escaladeOuverte();
-    const envoyer = vi.fn().mockResolvedValue(undefined);
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     await traiterMessageControle({ texte: "2 je passe dimanche", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).toHaveBeenCalledWith(contact.jid, "je passe dimanche");
   });
 
   it("refuse « 1 » quand l'escalade n'a pas de proposition", async () => {
     await escaladeOuverte(null);
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).not.toHaveBeenCalled();
     expect(r.reponse).toMatch(/aucune proposition/i);
@@ -60,7 +60,7 @@ describe("routeur du groupe de contrôle", () => {
 
   it("résout sans rien envoyer sur « 3 »", async () => {
     const { escalade } = await escaladeOuverte();
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     await traiterMessageControle({ texte: "3", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).not.toHaveBeenCalled();
     const apres = await prisma.escalation.findUnique({ where: { id: escalade.id } });
@@ -78,7 +78,7 @@ describe("routeur du groupe de contrôle", () => {
   it("ne réactive jamais un contact OFF sur « 4 » (P1) : classe l'escalade sans y toucher", async () => {
     const { contact, escalade } = await escaladeOuverte();
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: "OFF" } });
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     await traiterMessageControle({ texte: "4", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).not.toHaveBeenCalled();
     const contactApres = await prisma.contact.findUnique({ where: { id: contact.id } });
@@ -89,7 +89,7 @@ describe("routeur du groupe de contrôle", () => {
 
   it("refuse une action d'escalade sans réponse native, plutôt que de deviner laquelle", async () => {
     await escaladeOuverte();
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     const r = await traiterMessageControle({ texte: "1", replyToWaId: null, envoyer });
     expect(envoyer).not.toHaveBeenCalled();
     expect(r.reponse).toMatch(/réponds au message/i);
@@ -98,7 +98,7 @@ describe("routeur du groupe de contrôle", () => {
   it("refuse d'agir sur une escalade déjà résolue", async () => {
     const { escalade } = await escaladeOuverte();
     await prisma.escalation.update({ where: { id: escalade.id }, data: { status: "RESOLVED" } });
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).not.toHaveBeenCalled();
     expect(r.reponse).toMatch(/déjà/i);
@@ -188,7 +188,7 @@ describe("routeur du groupe de contrôle", () => {
         },
       });
 
-      const envoyer = vi.fn();
+      const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
       const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
       expect(envoyer).not.toHaveBeenCalled();
       expect(r.reponse).toMatch(/réponds au message/i);
@@ -213,7 +213,7 @@ describe("routeur du groupe de contrôle", () => {
     // drapeau. Sans lui, `/mode` sur un alias introuvable portait la même
     // action qu'un `/mode` appliqué et recevait un ✅ trompeur.
     const { contact } = await escaladeOuverte();
-    const envoyer = vi.fn().mockResolvedValue(undefined);
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
 
     expect((await traiterMessageControle({ texte: "/mode fantome auto", replyToWaId: null, envoyer })).aboutie).toBe(false);
     expect((await traiterMessageControle({ texte: "/qui fantome", replyToWaId: null, envoyer })).aboutie).toBe(false);
@@ -233,7 +233,7 @@ describe("routeur du groupe de contrôle", () => {
     // Le bouton panique doit tenir des deux côtés du système. Sans ce contrôle,
     // « /stop » puis « 1 » sur une escalade encore affichée expédiait le message.
     const { contact } = await escaladeOuverte();
-    const envoyer = vi.fn().mockResolvedValue(undefined);
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     await traiterMessageControle({ texte: "/stop", replyToWaId: null, envoyer });
 
     const r1 = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
@@ -258,7 +258,7 @@ describe("routeur du groupe de contrôle", () => {
     // remontant le fil : le message ne doit pas partir.
     const { contact } = await escaladeOuverte();
     await prisma.contact.update({ where: { id: contact.id }, data: { mode: "OFF" } });
-    const envoyer = vi.fn().mockResolvedValue(undefined);
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
 
     const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).not.toHaveBeenCalled();
@@ -275,7 +275,7 @@ describe("routeur du groupe de contrôle", () => {
     // ne l'a jamais été et ne le sera jamais.
     const { escalade } = await escaladeOuverte();
     await prisma.escalation.update({ where: { id: escalade.id }, data: { status: "EXPIRED" } });
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
 
     const r = await traiterMessageControle({ texte: "1", replyToWaId: "WA-CTRL-1", envoyer });
     expect(envoyer).not.toHaveBeenCalled();
@@ -291,7 +291,7 @@ describe("routeur du groupe de contrôle", () => {
     const jumeau = await prisma.contact.create({
       data: { jid: "22500000002@s.whatsapp.net", alias: "sarah", mode: "DRAFT", thread: { create: {} }, policy: { create: {} } },
     });
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
 
     const rMode = await traiterMessageControle({ texte: "/mode sarah auto", replyToWaId: null, envoyer });
     expect(rMode.aboutie).toBe(false);
@@ -308,7 +308,7 @@ describe("routeur du groupe de contrôle", () => {
 
   it("retrouve un contact quelle que soit la casse de l'alias tapé", async () => {
     const { contact } = await escaladeOuverte();
-    const envoyer = vi.fn();
+    const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     const r = await traiterMessageControle({ texte: "/qui SARAH", replyToWaId: null, envoyer });
     expect(r.aboutie).toBe(true);
     // La réponse nomme ce qui est en base, pas ce que l'utilisateur a tapé :

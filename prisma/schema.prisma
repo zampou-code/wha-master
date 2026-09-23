@@ -75,6 +75,9 @@ enum ProviderKind {
   ANTHROPIC
   OPENAI
   GOOGLE
+  // Kimi (Moonshot) parle le protocole OpenAI, mais mérite son propre nom :
+  // sans lui, il fallait connaître son adresse de base par cœur et la retaper.
+  KIMI
   OPENAI_COMPATIBLE
   OLLAMA
 }

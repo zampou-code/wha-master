@@ -149,6 +149,16 @@ export default function FicheContact() {
 
   const majPolitique = (partiel: Partial<Politique>) => setPolitique({ ...politique, ...partiel });
 
+  // Rien ne signalait qu'on quittait la page avec des changements non
+  // enregistrés. Le bouton est tout en bas, sous quatre sections : sur un
+  // téléphone, changer le mode en haut puis remonter est le geste le plus
+  // naturel — et le réglage était perdu sans un mot.
+  const modifie =
+    mode !== contact.mode ||
+    (alias.trim() || null) !== contact.alias ||
+    isAdult !== contact.isAdult ||
+    JSON.stringify(politique) !== JSON.stringify(contact.politique);
+
   return (
     <main className="ecran">
       <div className="colonne">
@@ -162,7 +172,13 @@ export default function FicheContact() {
         </header>
 
         {erreur && <p role="alert" className="alerte">{erreur}</p>}
-        {succes && <p role="status" className="confirmation">{succes}</p>}
+        {succes && !modifie && <p role="status" className="confirmation">{succes}</p>}
+        {modifie && (
+          <p role="status" className="alerte">
+            Modifications non enregistrées. Rien ne change tant que tu n&apos;as pas appuyé sur
+            « Enregistrer », tout en bas.
+          </p>
+        )}
 
         <section className="section">
           <h2>Mode</h2>
@@ -298,8 +314,13 @@ export default function FicheContact() {
           </div>
         </section>
 
-        <button type="button" className="bouton-principal" onClick={() => void enregistrer()} disabled={envoi}>
-          {envoi ? "Enregistrement…" : "Enregistrer"}
+        <button
+          type="button"
+          className="bouton-principal"
+          onClick={() => void enregistrer()}
+          disabled={envoi || !modifie}
+        >
+          {envoi ? "Enregistrement…" : modifie ? "Enregistrer" : "Rien à enregistrer"}
         </button>
 
         <Link href="/contacts" className="lien-discret">

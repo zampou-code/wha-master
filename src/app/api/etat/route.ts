@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ContactMode } from "@/generated/prisma/client";
+import { ContactMode, StatutEnvoi } from "@/generated/prisma/client";
 import { requireSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
@@ -16,6 +16,9 @@ export type EtatSysteme = {
   contacts: { pret: boolean; actifs: number; total: number };
   escaladesOuvertes: number;
   pauseGlobale: boolean;
+  // Sans ça, un envoi planifié et un envoi qui ne partira jamais se
+  // ressemblent exactement : dans les deux cas, rien n'arrive.
+  envois: { enAttente: number; prochainA: string | null; echecs: number };
 };
 
 export async function GET(request: Request) {
@@ -28,8 +31,19 @@ export async function GET(request: Request) {
   try {
     // Tout est lu en parallèle : c'est la première page ouverte, et chaque
     // lecture est indépendante des autres.
-    const [groupe, faitsPartageables, compose, classify, actifs, total, escaladesOuvertes, etat] =
-      await Promise.all([
+    const [
+      groupe,
+      faitsPartageables,
+      compose,
+      classify,
+      actifs,
+      total,
+      escaladesOuvertes,
+      etat,
+      enAttente,
+      prochain,
+      echecs,
+    ] = await Promise.all([
         lireGroupeDeControle(),
         prisma.personaFact.count({ where: { shareable: true } }),
         resoudreRoute("compose"),
@@ -38,6 +52,13 @@ export async function GET(request: Request) {
         prisma.contact.count(),
         prisma.escalation.count({ where: { status: "OPEN" } }),
         prisma.systemState.findUnique({ where: { id: "singleton" }, select: { globalPaused: true } }),
+        prisma.envoiPlanifie.count({ where: { statut: StatutEnvoi.EN_ATTENTE } }),
+        prisma.envoiPlanifie.findFirst({
+          where: { statut: StatutEnvoi.EN_ATTENTE },
+          orderBy: { aEnvoyerApres: "asc" },
+          select: { aEnvoyerApres: true },
+        }),
+        prisma.envoiPlanifie.count({ where: { statut: StatutEnvoi.ECHEC } }),
       ]);
 
     const reponse: EtatSysteme = {
@@ -48,6 +69,11 @@ export async function GET(request: Request) {
       contacts: { pret: actifs > 0, actifs, total },
       escaladesOuvertes,
       pauseGlobale: etat?.globalPaused ?? false,
+      envois: {
+        enAttente,
+        prochainA: prochain?.aEnvoyerApres.toISOString() ?? null,
+        echecs,
+      },
     };
     return NextResponse.json({ etat: reponse });
   } catch (erreur) {

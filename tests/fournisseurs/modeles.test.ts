@@ -4,6 +4,7 @@ import {
   modelesPour,
   modeleRecommande,
   POURQUOI_RECOMMANDE,
+  rolesSupportes,
   type KindModele,
   type RoleModele,
 } from "@/fournisseurs/modeles";
@@ -43,11 +44,22 @@ describe("catalogue de modèles", () => {
     }
   });
 
-  it("recommande un modèle pour chaque rôle des fournisseurs catalogués", () => {
+  it("recommande un modèle pour chaque rôle que le fournisseur sait tenir", () => {
     for (const kind of Object.values(ProviderKind)) {
       if (modelesPour(kind).length === 0) continue;
-      for (const role of ROLES) {
+      for (const role of rolesSupportes(kind)) {
         expect(modeleRecommande(kind, role), `${kind} / ${role}`).not.toBeNull();
+      }
+    }
+  });
+
+  it("ne recommande rien pour un rôle que le fournisseur ne sait pas tenir", () => {
+    // Jev ne génère pas de texte : le proposer pour « Rédiger » donnerait un
+    // réglage d'apparence valide qui échouerait au premier message.
+    for (const kind of Object.values(ProviderKind)) {
+      const supportes = rolesSupportes(kind);
+      for (const role of ROLES.filter((r) => !supportes.includes(r))) {
+        expect(modeleRecommande(kind, role), `${kind} / ${role}`).toBeNull();
       }
     }
   });

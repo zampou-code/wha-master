@@ -9,6 +9,7 @@ export type KindModele =
   | "OPENAI"
   | "GOOGLE"
   | "KIMI"
+  | "TYPESAFE"
   | "OPENAI_COMPATIBLE"
   | "OLLAMA";
 
@@ -53,6 +54,13 @@ const CATALOGUE: Partial<Record<KindModele, ModeleConnu[]>> = {
       note: "Pensé pour le code — sans intérêt ici.",
     },
   ],
+  TYPESAFE: [
+    {
+      id: "jev-latest",
+      libelle: "Jev",
+      note: "Rend des probabilités calibrées plutôt que du texte. Dix fois plus rapide et presque gratuit — mais il ne sait que classer.",
+    },
+  ],
   ANTHROPIC: [
     { id: "claude-haiku-4-5-20251001", libelle: "Haiku 4.5", note: "Rapide et bon marché." },
     { id: "claude-sonnet-5", libelle: "Sonnet 5", note: "Équilibré, bon en français courant." },
@@ -73,13 +81,31 @@ export function modelesPour(kind: KindModele): ModeleConnu[] {
  * marché y suffit. La rédaction, elle, produit ce que ton contact va lire :
  * c'est le seul endroit où payer plus se justifie.
  */
-const RECOMMANDATIONS: Partial<Record<KindModele, Record<RoleModele, string>>> = {
+/**
+ * Les rôles qu'un fournisseur sait réellement tenir.
+ *
+ * Jev ne génère pas de texte : le proposer pour « Rédiger » donnerait un
+ * réglage d'apparence valide qui échouerait au premier message. Les autres
+ * fournisseurs tiennent les quatre rôles.
+ */
+const ROLES_SUPPORTES: Partial<Record<KindModele, RoleModele[]>> = {
+  TYPESAFE: ["classify"],
+};
+
+export const TOUS_LES_ROLES: RoleModele[] = ["classify", "compose", "profile", "summarize"];
+
+export function rolesSupportes(kind: KindModele): RoleModele[] {
+  return ROLES_SUPPORTES[kind] ?? TOUS_LES_ROLES;
+}
+
+const RECOMMANDATIONS: Partial<Record<KindModele, Partial<Record<RoleModele, string>>>> = {
   KIMI: {
     classify: "kimi-k2.6",
     compose: "kimi-k2.6",
     profile: "kimi-k3",
     summarize: "kimi-k2.6",
   },
+  TYPESAFE: { classify: "jev-latest" },
   ANTHROPIC: {
     classify: "claude-haiku-4-5-20251001",
     compose: "claude-sonnet-5",

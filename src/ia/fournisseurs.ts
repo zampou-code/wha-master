@@ -52,6 +52,13 @@ export function modelePour(entree: EntreeRoute): LanguageModel {
         apiKey: entree.apiKey ?? undefined,
       })(entree.model);
 
+    // Jev ne génère pas de texte : il n'a rien à faire ici. On le dit
+    // explicitement plutôt que de laisser le switch tomber dans le vide.
+    case ProviderKind.TYPESAFE:
+      throw new FournisseurInvalideError(
+        `${entree.nom} (Jev) ne sait que classer : il ne peut pas tenir ce rôle.`,
+      );
+
     // Ollama sert en local sans clé.
     case ProviderKind.OLLAMA:
       if (!entree.baseUrl) throw new FournisseurInvalideError(`baseUrl absente pour ${entree.nom}`);

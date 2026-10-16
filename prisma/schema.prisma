@@ -78,6 +78,9 @@ enum ProviderKind {
   // Kimi (Moonshot) parle le protocole OpenAI, mais mérite son propre nom :
   // sans lui, il fallait connaître son adresse de base par cœur et la retaper.
   KIMI
+  // Jev (TypeSafe) ne génère pas de texte : il rend des probabilités calibrées.
+  // Il ne sert donc qu'au rôle « Classer », et ne passe pas par l'AI SDK.
+  TYPESAFE
   OPENAI_COMPATIBLE
   OLLAMA
 }

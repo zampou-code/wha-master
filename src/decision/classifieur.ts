@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { RiskCategory } from "@/generated/prisma/client";
 import { appelerStructure, AucunFournisseurError } from "@/ia/appel";
+import { resoudreRoute, type EntreeRoute } from "@/ia/registre";
+import { ProviderKind } from "@/generated/prisma/client";
+import { classifierParJev, coutJev } from "./jev";
 import { log } from "@/lib/log";
 import type { SignalRisque } from "./types";
 
@@ -60,8 +63,53 @@ export async function classifier(params: {
   texte: string;
   contactId?: string;
   appeler?: typeof appelerStructure;
+  resoudre?: typeof resoudreRoute;
+  jev?: typeof classifierParJev;
 }): Promise<ResultatClassification> {
   const appeler = params.appeler ?? appelerStructure;
+
+  // Jev ne passe pas par l'AI SDK : il ne génère pas de texte, il rend des
+  // probabilités. On regarde donc d'abord si la route du rôle « Classer » le
+  // désigne, avant de retomber sur le chemin générique. Les entrées suivantes
+  // de la cascade restent disponibles si Jev échoue.
+  const resoudre = params.resoudre ?? resoudreRoute;
+  let entreesJev: EntreeRoute[] = [];
+  try {
+    const entrees = await resoudre("classify", { contactId: params.contactId });
+    entreesJev = entrees.filter((entree) => entree.kind === ProviderKind.TYPESAFE);
+  } catch (erreur) {
+    log.warn("Route de classement illisible, repli sur le chemin générique", {
+      erreur: erreur instanceof Error ? erreur.message : String(erreur),
+    });
+  }
+
+  for (const entree of entreesJev) {
+    const debut = Date.now();
+    try {
+      const resultat = await (params.jev ?? classifierParJev)({ entree, texte: params.texte });
+      const probas = Object.entries(resultat.probabilites)
+        .filter(([, valeur]) => valeur >= 0.15)
+        .map(([categorie, valeur]) => `${categorie} ${valeur.toFixed(2)}`)
+        .join(", ");
+      return {
+        signaux: resultat.signaux,
+        // Jev rend une probabilité par question, pas une confiance globale.
+        // Déclarer une confiance basse ajouterait LOW_CONFIDENCE à chaque
+        // message, donc une escalade systématique : la force du modèle est
+        // justement que chaque probabilité est calibrée séparément.
+        confiance: 1,
+        motif: probas ? `Jev : ${probas}` : "Jev : aucun risque au-dessus du seuil",
+        fournisseur: entree.nom,
+        latencyMs: Date.now() - debut,
+        costUsd: coutJev(resultat.tokensEntree),
+      };
+    } catch (erreur) {
+      log.warn("Jev indisponible, on passe au fournisseur suivant", {
+        fournisseur: entree.nom,
+        erreur: erreur instanceof Error ? erreur.message : String(erreur),
+      });
+    }
+  }
 
   try {
     const resultat = await appeler({

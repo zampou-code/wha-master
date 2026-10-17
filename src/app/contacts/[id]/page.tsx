@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import ImportHistorique from "./import";
 
 type Mode = "OFF" | "DRAFT" | "AUTO";
 type Politique = {
@@ -313,6 +314,8 @@ export default function FicheContact() {
             </label>
           </div>
         </section>
+
+        <ImportHistorique contactId={contact.id} surImport={() => void charger()} />
 
         <button
           type="button"

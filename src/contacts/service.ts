@@ -1,7 +1,7 @@
 import { ContactMode } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
-import { filtrePersonnes } from "./jid";
+import { filtrePersonnes, filtreNonPersonnes } from "./jid";
 
 export type ContactListe = {
   id: string;
@@ -95,6 +95,42 @@ export async function listerContacts(): Promise<ContactListe[]> {
     messages: contact.thread?._count.messages ?? 0,
     escaladesOuvertes: parContact.get(contact.id) ?? 0,
   }));
+}
+
+/**
+ * Ce que l'ingestion d'avant a laissé en base : des groupes, des statuts et des
+ * chaînes devenus « contacts », avec leurs messages et leurs décisions.
+ */
+export type ResteNonPersonnes = { contacts: number; messages: number; decisions: number };
+
+export async function compterNonPersonnes(): Promise<ResteNonPersonnes> {
+  const [contacts, messages, decisions] = await Promise.all([
+    prisma.contact.count({ where: filtreNonPersonnes() }),
+    prisma.message.count({ where: { thread: { contact: filtreNonPersonnes() } } }),
+    prisma.decision.count({ where: { contact: filtreNonPersonnes() } }),
+  ]);
+  return { contacts, messages, decisions };
+}
+
+/**
+ * Les efface pour de bon.
+ *
+ * Tout part par les cascades du schéma : fil, messages, décisions, escalades,
+ * politique, envois planifiés. C'est irréversible et sans sauvegarde — d'où le
+ * compte rendu, écrit avant l'effacement pour pouvoir dire exactement ce qui a
+ * disparu, et la ligne de journal qui en garde la trace.
+ */
+export async function supprimerNonPersonnes(): Promise<ResteNonPersonnes> {
+  const reste = await compterNonPersonnes();
+  if (reste.contacts === 0) return reste;
+
+  const { count } = await prisma.contact.deleteMany({ where: filtreNonPersonnes() });
+  log.info("Contacts hors personnes effacés", {
+    contacts: count,
+    messages: reste.messages,
+    decisions: reste.decisions,
+  });
+  return { ...reste, contacts: count };
 }
 
 export async function lireContact(id: string): Promise<ContactDetail | null> {

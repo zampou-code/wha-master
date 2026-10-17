@@ -1,6 +1,7 @@
 import { ContactMode } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { log } from "@/lib/log";
+import { filtrePersonnes } from "./jid";
 
 export type ContactListe = {
   id: string;
@@ -52,6 +53,12 @@ function nomLisible(contact: { alias: string | null; pushName: string | null; ji
 
 export async function listerContacts(): Promise<ContactListe[]> {
   const contacts = await prisma.contact.findMany({
+    // Groupes, statuts et chaînes sont écartés en base plutôt qu'après coup :
+    // la liste est triée et lue telle quelle, un filtrage en mémoire fausserait
+    // l'ordre autant que ce qui s'affiche. Les lignes déjà créées par
+    // l'ingestion d'avant restent en base — elles ne sont plus montrées, et
+    // aucune nouvelle n'apparaît (src/ingest/handler.ts).
+    where: filtrePersonnes(),
     include: {
       thread: { select: { lastMessageAt: true, _count: { select: { messages: true } } } },
       _count: { select: { decisions: true } },

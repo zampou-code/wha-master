@@ -1,6 +1,7 @@
 import { ContactMode, MessageSource, type Contact } from "@/generated/prisma/client";
 import { consignerEnvoi } from "@/envoi/journal";
 import { prisma } from "@/lib/prisma";
+import { filtrePersonnes } from "@/contacts/jid";
 import { log } from "@/lib/log";
 import { createGowaClient } from "@/gowa/client";
 import { analyserCommande, type Commande } from "./commandes";
@@ -115,7 +116,9 @@ async function contactParAlias(alias: string): Promise<ResolutionAlias> {
     // `insensitive` : l'utilisateur tape « Sarah » ou « sarah » selon le clavier
     // de son téléphone, et l'analyseur de commandes ne met pas l'alias en bas
     // de casse.
-    where: { alias: { equals: alias, mode: "insensitive" } },
+    // Un groupe ne peut pas porter d'alias aujourd'hui, mais rien ne
+    // l'empêchait : une commande aurait pu mettre un groupe en AUTO.
+    where: { ...filtrePersonnes(), alias: { equals: alias, mode: "insensitive" } },
     take: 2,
   });
   if (candidats.length === 0) return { type: "absent" };
@@ -155,7 +158,7 @@ export async function traiterMessageControle(params: {
   }
   if (commande.type === "statut") {
     const [actifs, ouvertes] = await Promise.all([
-      prisma.contact.count({ where: { mode: { not: ContactMode.OFF } } }),
+      prisma.contact.count({ where: { ...filtrePersonnes(), mode: { not: ContactMode.OFF } } }),
       prisma.escalation.count({ where: { status: "OPEN" } }),
     ]);
     return { action: "statut", reponse: `${actifs} contact(s) actif(s), ${ouvertes} escalade(s) ouverte(s).`, aboutie: true };

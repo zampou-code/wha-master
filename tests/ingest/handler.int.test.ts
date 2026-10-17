@@ -34,6 +34,29 @@ function evenement(surcharge: Record<string, unknown> = {}) {
 describe("ingestion d'un message", () => {
   beforeEach(resetDb);
 
+  it("n'ingère ni groupe, ni statut, ni chaîne", async () => {
+    // Chaque groupe WhatsApp devenait un « contact », et chacun de ses messages
+    // partait au classifieur : un appel de modèle payé par message de groupe,
+    // pour une conversation que le harness n'entretient pas.
+    const classifieur = vi.fn(classifieurCalme);
+
+    for (const [index, chatId] of [
+      "120363401234567890@g.us",
+      "status@broadcast",
+      "120363987654321098@newsletter",
+    ].entries()) {
+      const resultat = await ingererMessage(
+        evenement({ id: `MSG-HP-${index}`, chat_id: chatId }),
+        { classifierImpl: classifieur as never },
+      );
+      expect(resultat.statut).toBe("hors_personne");
+    }
+
+    expect(await prisma.contact.count()).toBe(0);
+    expect(await prisma.message.count()).toBe(0);
+    expect(classifieur).not.toHaveBeenCalled();
+  });
+
   it("crée le contact découvert en mode OFF (principe P1)", async () => {
     await ingererMessage(evenement(), {});
     const contact = await prisma.contact.findUnique({

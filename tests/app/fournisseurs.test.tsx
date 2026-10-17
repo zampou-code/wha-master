@@ -58,13 +58,15 @@ describe("page fournisseurs — rôles affichés", () => {
   it("n'offre que les rôles que le moteur appelle vraiment", async () => {
     // « Profiler » et « Résumer » étaient réglables alors que rien ne les
     // appelle : le réglage se faisait, s'enregistrait, et ne changeait rien.
-    fetchMock.mockResolvedValue(reponseJson(reglages({ classify: [], compose: [] })));
+    fetchMock.mockResolvedValue(reponseJson(reglages({ classify: [], compose: [], summarize: [] })));
     await monter();
 
     expect(screen.getByText("Classer")).toBeTruthy();
     expect(screen.getByText("Rédiger")).toBeTruthy();
+    // « Résumer » est revenu le jour où le résumé glissant a été écrit : le rôle
+    // est appelé par la tâche de fond (src/redacteur/resume.ts).
+    expect(screen.getByText("Résumer")).toBeTruthy();
     expect(screen.queryByText("Profiler")).toBeNull();
-    expect(screen.queryByText("Résumer")).toBeNull();
   });
 
   it("garde en base les affectations des rôles retirés", async () => {
@@ -74,7 +76,7 @@ describe("page fournisseurs — rôles affichés", () => {
       reponseJson(
         reglages({
           classify: [{ providerId: "p2", model: "jev-latest" }],
-          summarize: [{ providerId: "p1", model: "kimi-k2.6" }],
+          profile: [{ providerId: "p1", model: "kimi-k3" }],
         }),
       ),
     );
@@ -84,7 +86,7 @@ describe("page fournisseurs — rôles affichés", () => {
 
     expect(dernierPut().roles).toEqual({
       classify: [{ providerId: "p2", model: "jev-latest" }],
-      summarize: [{ providerId: "p1", model: "kimi-k2.6" }],
+      profile: [{ providerId: "p1", model: "kimi-k3" }],
     });
   });
 
@@ -134,7 +136,7 @@ describe("page fournisseurs — Jev", () => {
   it("propose Jev dans les types de fournisseur", async () => {
     // Le classifieur sait l'appeler depuis le 2026-10-16, mais le formulaire ne
     // permettait pas de l'ajouter : la fonction était inaccessible.
-    fetchMock.mockResolvedValue(reponseJson(reglages({ classify: [], compose: [] })));
+    fetchMock.mockResolvedValue(reponseJson(reglages({ classify: [], compose: [], summarize: [] })));
     await monter();
 
     expect(screen.getByRole("option", { name: /Jev \(TypeSafe\)/ })).toBeTruthy();

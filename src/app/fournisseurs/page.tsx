@@ -69,13 +69,18 @@ const KINDS: TypeFournisseur[] = [
 /**
  * Les rôles que le moteur appelle réellement aujourd'hui.
  *
- * `classify` part à chaque message reçu (src/decision/classifieur.ts) et
- * `compose` à chaque réponse rédigée (src/redacteur/redacteur.ts). Ce sont les
- * deux seuls appels de rôle en production.
+ * `classify` part à chaque message reçu (src/decision/classifieur.ts),
+ * `compose` à chaque réponse rédigée (src/redacteur/redacteur.ts), et
+ * `summarize` depuis la tâche de fond (src/redacteur/resume.ts).
  */
 const ROLES: { cle: string; titre: string; detail: string }[] = [
   { cle: "classify", titre: "Classer", detail: "Repère le risque dans les messages reçus." },
   { cle: "compose", titre: "Rédiger", detail: "Écrit les réponses qui te sont soumises." },
+  {
+    cle: "summarize",
+    titre: "Résumer",
+    detail: "Condense les longues conversations pour que le rédacteur garde le passé en tête.",
+  },
 ];
 
 /**
@@ -86,10 +91,7 @@ const ROLES: { cle: string; titre: string; detail: string }[] = [
  * ici d'une ligne. Les afficher en attendant donnait un réglage qui ne
  * changeait rien : le pire genre de bouton.
  */
-const ROLES_DORMANTS: { cle: string; titre: string }[] = [
-  { cle: "profile", titre: "Profiler" },
-  { cle: "summarize", titre: "Résumer" },
-];
+const ROLES_DORMANTS: { cle: string; titre: string }[] = [{ cle: "profile", titre: "Profiler" }];
 
 const MESSAGE_RESEAU = "Connexion réseau impossible. Réessaie dans un instant.";
 

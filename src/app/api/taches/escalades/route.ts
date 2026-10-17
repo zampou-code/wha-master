@@ -4,6 +4,7 @@ import { log } from "@/lib/log";
 import { constantTimeEquals } from "@/lib/crypto";
 import { expirerEscalades } from "@/escalade/expiration";
 import { traiterEnvoisDus } from "@/envoi/file";
+import { resumerFilsEnRetard } from "@/redacteur/resume";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,19 @@ export async function POST(request: Request) {
   if (!fourni || !constantTimeEquals(fourni, getEnv().GOWA_WEBHOOK_SECRET)) {
     return NextResponse.json({ erreur: "Non autorisé" }, { status: 401 });
   }
-  // Les deux travaux de fond passent par le même appel : ils sont indépendants,
-  // et une seule tâche planifiée à entretenir vaut mieux que deux. Chacun est
+  // Les travaux de fond passent par le même appel : ils sont indépendants, et
+  // une seule tâche planifiée à entretenir vaut mieux que trois. Chacun est
   // isolé, parce qu'une expiration en panne ne doit pas retenir des messages
   // déjà promis — et réciproquement.
-  const [expiration, envois] = await Promise.allSettled([expirerEscalades(), traiterEnvoisDus()]);
+  //
+  // Le résumé vient en dernier et n'a pas de latence à respecter : c'est le
+  // seul endroit raisonnable pour l'appeler. Le faire à la réception d'un
+  // message aurait ajouté un appel de modèle devant chaque réponse.
+  const [expiration, envois, resumes] = await Promise.allSettled([
+    expirerEscalades(),
+    traiterEnvoisDus(),
+    resumerFilsEnRetard(),
+  ]);
 
   if (expiration.status === "rejected") {
     log.error("Expiration des escalades en échec", { erreur: String(expiration.reason) });
@@ -27,13 +36,19 @@ export async function POST(request: Request) {
   if (envois.status === "rejected") {
     log.error("Traitement de la file d'envoi en échec", { erreur: String(envois.reason) });
   }
+  if (resumes.status === "rejected") {
+    log.error("Résumés en retard non traités", { erreur: String(resumes.reason) });
+  }
 
   const corps = {
     ...(expiration.status === "fulfilled" ? expiration.value : { expirationEnEchec: true }),
     ...(envois.status === "fulfilled" ? envois.value : { envoisEnEchec: true }),
+    ...(resumes.status === "fulfilled" ? { resumes: resumes.value } : { resumesEnEchec: true }),
   };
-  // 500 si l'un des deux a échoué : la tâche planifiée doit le voir dans son
-  // journal plutôt que de croire que tout va bien.
+  // 500 si l'un des deux travaux porteurs a échoué : la tâche planifiée doit le
+  // voir dans son journal plutôt que de croire que tout va bien. Le résumé, lui,
+  // ne retient aucun message : son échec est journalisé sans faire passer la
+  // tâche pour en panne.
   const echec = expiration.status === "rejected" || envois.status === "rejected";
   return NextResponse.json(corps, { status: echec ? 500 : 200 });
 }

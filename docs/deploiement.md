@@ -129,11 +129,31 @@ prétexte — voir la vérification d'isolement en section 6.
 curl -s https://$APP_DOMAIN/api/health
 ```
 
-Réponse attendue : `{"status":"ok","db":"up"}`.
+Réponse attendue :
+`{"status":"ok","db":"up","version":"523ce4023cb3","groupeDeControle":"configuré"}`.
 
 Cette route (`src/app/api/health/route.ts`) exécute `SELECT 1` sur la base
 Postgres ; en cas d'échec elle répond `{"status":"degraded","db":"down"}`
 avec un code HTTP 503.
+
+`version` donne les douze premiers caractères du commit **réellement
+déployé**. C'est la seule façon de vérifier qu'un déploiement a pris :
+
+```bash
+curl -s https://$APP_DOMAIN/api/health | grep -o '"version":"[^"]*"'
+git log --oneline -1
+```
+
+Les deux doivent désigner le même commit. Le SHA est figé dans l'image à sa
+construction (`src/scripts/ecrire-version.ts` écrit `.commit-sha`), à partir
+des trois seules entrées de `.git` que le `.dockerignore` laisse passer
+(`HEAD`, `refs`, `packed-refs`). Si `version` vaut `inconnu`, l'image a été
+construite sans ces fichiers — le déploiement fonctionne, mais plus rien ne
+dit quelle version tourne. Un build hors dépôt Git peut aussi passer la valeur
+en argument : `docker compose build --build-arg GIT_SHA=$(git rev-parse HEAD)`.
+
+`groupeDeControle` vaut `absent` tant qu'aucun groupe WhatsApp n'a été choisi —
+voir la section 3 pour ce que cela dégrade.
 
 ---
 

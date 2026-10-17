@@ -1,6 +1,15 @@
+.git
+# Trois exceptions, et seulement elles : de quoi résoudre le commit construit
+# (src/scripts/ecrire-version.ts) sans faire entrer tout l'historique dans le
+# contexte de build.
+!.git/HEAD
+!.git/refs
+!.git/packed-refs
+# Recalculé dans l'image : un fichier local traînant ici ferait afficher une
+# version périmée à toutes les images suivantes.
+.commit-sha
 node_modules
 .next
-.git
 .env
 docs
 tests

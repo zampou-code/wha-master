@@ -10,3 +10,6 @@ next-env.d.ts
 *.tsbuildinfo
 docs/prive/
 persona.json
+
+# Écrit à la construction de l'image (src/scripts/ecrire-version.ts).
+.commit-sha

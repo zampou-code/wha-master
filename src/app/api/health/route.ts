@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { versionDeploiement } from "@/config/version";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ export async function GET() {
   // doit répondre même quand la configuration est invalide — c'est précisément
   // le cas où on l'interroge — et `getEnv()` lève dans cette situation.
   let groupeDeControle = process.env.CONTROL_GROUP_JID ? "configuré" : "absent";
+  // Le commit déployé : sans lui, cette route répondait la même chose avant et
+  // après un déploiement, et vérifier qu'il avait pris demandait de deviner.
+  const version = versionDeploiement();
 
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -23,8 +27,11 @@ export async function GET() {
       select: { controlGroupJid: true },
     });
     if (etat?.controlGroupJid) groupeDeControle = "configuré";
-    return NextResponse.json({ status: "ok", db: "up", groupeDeControle });
+    return NextResponse.json({ status: "ok", db: "up", version, groupeDeControle });
   } catch {
-    return NextResponse.json({ status: "degraded", db: "down", groupeDeControle }, { status: 503 });
+    return NextResponse.json(
+      { status: "degraded", db: "down", version, groupeDeControle },
+      { status: 503 },
+    );
   }
 }

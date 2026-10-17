@@ -67,11 +67,16 @@ const KINDS: TypeFournisseur[] = [
 ];
 
 /**
- * Les rôles que le moteur appelle réellement aujourd'hui.
+ * Les quatre rôles, tous appelés par le moteur.
  *
- * `classify` part à chaque message reçu (src/decision/classifieur.ts),
- * `compose` à chaque réponse rédigée (src/redacteur/redacteur.ts), et
- * `summarize` depuis la tâche de fond (src/redacteur/resume.ts).
+ * `classify` à chaque message reçu (src/decision/classifieur.ts), `compose` à
+ * chaque réponse rédigée (src/redacteur/redacteur.ts), `summarize` depuis la
+ * tâche de fond (src/redacteur/resume.ts) et `profile` quand on analyse
+ * l'historique d'un contact (src/profilage/profileur.ts).
+ *
+ * « Profiler » et « Résumer » avaient été retirés de cette page le temps
+ * qu'ils ne servent à rien : un réglage sans effet est pire qu'un réglage
+ * absent.
  */
 const ROLES: { cle: string; titre: string; detail: string }[] = [
   { cle: "classify", titre: "Classer", detail: "Repère le risque dans les messages reçus." },
@@ -81,17 +86,13 @@ const ROLES: { cle: string; titre: string; detail: string }[] = [
     titre: "Résumer",
     detail: "Condense les longues conversations pour que le rédacteur garde le passé en tête.",
   },
+  {
+    cle: "profile",
+    titre: "Profiler",
+    detail: "Déduit des réglages de l'historique, avec leurs preuves.",
+  },
 ];
 
-/**
- * Les rôles que la couche IA sait tenir mais que rien n'appelle encore.
- *
- * Ils restent dans `RoleIA` et dans le catalogue de modèles — le jour où le
- * résumé glissant et la proposition de réglages sont écrits, ils reviennent
- * ici d'une ligne. Les afficher en attendant donnait un réglage qui ne
- * changeait rien : le pire genre de bouton.
- */
-const ROLES_DORMANTS: { cle: string; titre: string }[] = [{ cle: "profile", titre: "Profiler" }];
 
 const MESSAGE_RESEAU = "Connexion réseau impossible. Réessaie dans un instant.";
 
@@ -343,18 +344,6 @@ export default function Fournisseurs() {
     setReglages({ ...reglages, roles: { ...reglages.roles, [role]: entrees } });
   };
 
-  // Un rôle retiré de la page garde ses affectations en base : les cacher sans
-  // le dire laisserait un réglage invisible, impossible à retrouver comme à
-  // effacer. On les montre en une ligne, avec de quoi s'en débarrasser.
-  const dormantsConfigures = ROLES_DORMANTS.filter(
-    (role) => (reglages.roles[role.cle] ?? []).length > 0,
-  );
-  const oublierRolesDormants = () => {
-    const roles = { ...reglages.roles };
-    for (const role of ROLES_DORMANTS) delete roles[role.cle];
-    setReglages({ ...reglages, roles });
-  };
-
   return (
     <main className="ecran">
       <div className="colonne">
@@ -554,19 +543,7 @@ export default function Fournisseurs() {
                 Ajouter un fournisseur à ce rôle
               </button>
             </div>
-          ))}
-          {dormantsConfigures.length > 0 && (
-            <p className="section__aide">
-              {dormantsConfigures.map((role) => role.titre).join(" et ")}{" "}
-              {dormantsConfigures.length > 1 ? "ont" : "a"} encore un fournisseur affecté en base,
-              mais rien ne les appelle pour l&apos;instant.{" "}
-              <button type="button" className="lien-inline" onClick={oublierRolesDormants}>
-                Oublier ces affectations
-              </button>{" "}
-              puis enregistre.
-            </p>
-          )}
-          <button
+          ))}          <button
             type="button"
             className="bouton-principal"
             disabled={envoi}

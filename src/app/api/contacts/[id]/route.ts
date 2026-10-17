@@ -9,6 +9,7 @@ import {
   modifierPolitique,
   ReglageRefuseError,
 } from "@/contacts/service";
+import { lireProfil } from "@/profilage/profileur";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,9 @@ export async function GET(request: Request, contexte: { params: Promise<{ id: st
   const { id } = await contexte.params;
   const contact = await lireContact(id);
   if (!contact) return NextResponse.json({ erreur: "Contact introuvable." }, { status: 404 });
-  return NextResponse.json({ contact });
+  // Le profil déduit part avec la fiche : il est déjà calculé, et un second
+  // aller-retour pour l'afficher serait du temps perdu sur un téléphone.
+  return NextResponse.json({ contact, profil: await lireProfil(id) });
 }
 
 export async function PATCH(request: Request, contexte: { params: Promise<{ id: string }> }) {

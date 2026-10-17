@@ -74,12 +74,11 @@ export async function listerContacts(): Promise<ContactListe[]> {
   // lourd à lire qu'à exécuter.
   const ouvertes = await prisma.escalation.findMany({
     where: { status: "OPEN" },
-    select: { decision: { select: { contactId: true } } },
+    select: { contactId: true },
   });
   const parContact = new Map<string, number>();
   for (const escalade of ouvertes) {
-    const contactId = escalade.decision.contactId;
-    parContact.set(contactId, (parContact.get(contactId) ?? 0) + 1);
+    parContact.set(escalade.contactId, (parContact.get(escalade.contactId) ?? 0) + 1);
   }
 
   return contacts.map((contact) => ({

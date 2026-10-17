@@ -27,7 +27,7 @@ describe("service d'escalade", () => {
 
   it("crée une escalade ouverte liée à la décision", async () => {
     const d = await decision();
-    const { id } = await creerEscalade({ decisionId: d.id, proposition: "Vendredi ça me va" });
+    const { id } = await creerEscalade({ contactId: d.contactId, decisionId: d.id, proposition: "Vendredi ça me va" });
     const e = await prisma.escalation.findUnique({ where: { id } });
     expect(e?.status).toBe("OPEN");
     expect(e?.proposedText).toBe("Vendredi ça me va");
@@ -37,7 +37,7 @@ describe("service d'escalade", () => {
   it("fixe une échéance par défaut à six heures", async () => {
     const d = await decision();
     const avant = Date.now();
-    const { id } = await creerEscalade({ decisionId: d.id, proposition: null });
+    const { id } = await creerEscalade({ contactId: d.contactId, decisionId: d.id, proposition: null });
     const e = await prisma.escalation.findUnique({ where: { id } });
     const ecart = e!.expiresAt.getTime() - avant;
     expect(ecart).toBeGreaterThan(DUREE_ESCALADE_MS - 5_000);
@@ -46,7 +46,7 @@ describe("service d'escalade", () => {
 
   it("enregistre l'identifiant du message de contrôle, qui sert à la résolution", async () => {
     const d = await decision();
-    const { id } = await creerEscalade({ decisionId: d.id, proposition: null });
+    const { id } = await creerEscalade({ contactId: d.contactId, decisionId: d.id, proposition: null });
     await marquerPostee(id, "WA-CTRL-1");
     const e = await prisma.escalation.findUnique({ where: { id } });
     expect(e?.controlMessageWaId).toBe("WA-CTRL-1");
@@ -54,7 +54,7 @@ describe("service d'escalade", () => {
 
   it("refuse deux escalades pour la même décision", async () => {
     const d = await decision();
-    await creerEscalade({ decisionId: d.id, proposition: null });
-    await expect(creerEscalade({ decisionId: d.id, proposition: null })).rejects.toThrow();
+    await creerEscalade({ contactId: d.contactId, decisionId: d.id, proposition: null });
+    await expect(creerEscalade({ contactId: d.contactId, decisionId: d.id, proposition: null })).rejects.toThrow();
   });
 });

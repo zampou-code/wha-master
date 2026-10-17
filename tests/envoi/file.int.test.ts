@@ -141,7 +141,7 @@ describe("file d'envoi", () => {
       data: { messageId: message.id, contactId: c.id, risks: [], ruleFired: "r", outcome: "ESCALATED" },
     });
     await prisma.escalation.create({
-      data: { decisionId: decision.id, expiresAt: new Date(midi.getTime() + 3_600_000) },
+      data: { contactId: decision.contactId, decisionId: decision.id, expiresAt: new Date(midi.getTime() + 3_600_000) },
     });
 
     const { envoyer, presence } = simulacres();
@@ -343,6 +343,6 @@ async function escaladeSur(contactId: string, statut: "OPEN" | "RESOLVED") {
     data: { messageId: message.id, contactId, risks: [], ruleFired: "r", outcome: "ESCALATED" },
   });
   await prisma.escalation.create({
-    data: { decisionId: decision.id, status: statut, expiresAt: new Date(Date.now() + 3_600_000) },
+    data: { contactId: decision.contactId, decisionId: decision.id, status: statut, expiresAt: new Date(Date.now() + 3_600_000) },
   });
 }

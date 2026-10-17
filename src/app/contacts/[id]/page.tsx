@@ -291,6 +291,30 @@ export default function FicheContact() {
         </section>
 
         <section className="section">
+          <h2>Relancer la conversation</h2>
+          <p className="section__aide">
+            Quand la conversation s&apos;éteint et que c&apos;est toi qui as écrit en dernier,
+            l&apos;assistant peut proposer un message pour la reprendre. Une seule fois par
+            silence, et jamais pendant les heures de silence.
+          </p>
+          <label className="champ">
+            <span>Initiative</span>
+            <select
+              value={politique.styleInitiative}
+              onChange={(e) => majPolitique({ styleInitiative: e.target.value })}
+            >
+              <option value="jamais">Jamais — n&apos;écrit que des réponses</option>
+              <option value="rare">Rare — après trois jours de silence</option>
+              <option value="souvent">Souvent — après un jour de silence</option>
+            </select>
+            <span className="champ__aide">
+              En mode brouillon, la relance t&apos;est proposée dans le groupe de contrôle. En
+              automatique, elle part comme une réponse.
+            </span>
+          </label>
+        </section>
+
+        <section className="section">
           <h2>Heures de silence</h2>
           <p className="section__aide">
             Aucune réponse ne part entre ces deux heures. Laisse vide pour ne jamais les appliquer.

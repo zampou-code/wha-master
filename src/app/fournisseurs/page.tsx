@@ -5,11 +5,19 @@ import Link from "next/link";
 import {
   modelesPour,
   modeleRecommande,
+  rolesSupportes,
   POURQUOI_RECOMMANDE,
   type RoleModele,
 } from "@/fournisseurs/modeles";
 
-type Kind = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "KIMI" | "OPENAI_COMPATIBLE" | "OLLAMA";
+type Kind =
+  | "ANTHROPIC"
+  | "OPENAI"
+  | "GOOGLE"
+  | "KIMI"
+  | "TYPESAFE"
+  | "OPENAI_COMPATIBLE"
+  | "OLLAMA";
 type Fournisseur = {
   id: string;
   name: string;
@@ -41,7 +49,13 @@ const KINDS: TypeFournisseur[] = [
     libelle: "Kimi (Moonshot)",
     adresseRequise: false,
     adresseParDefaut: "https://api.moonshot.ai/v1",
-    modeleExemple: "kimi-k2-0905-preview",
+    modeleExemple: "kimi-k2.6",
+  },
+  {
+    valeur: "TYPESAFE",
+    libelle: "Jev (TypeSafe) — classement seulement",
+    adresseRequise: false,
+    modeleExemple: "jev-latest",
   },
   {
     valeur: "OPENAI_COMPATIBLE",
@@ -52,11 +66,29 @@ const KINDS: TypeFournisseur[] = [
   { valeur: "OLLAMA", libelle: "Ollama (local)", adresseRequise: true, modeleExemple: "llama3.1" },
 ];
 
+/**
+ * Les rôles que le moteur appelle réellement aujourd'hui.
+ *
+ * `classify` part à chaque message reçu (src/decision/classifieur.ts) et
+ * `compose` à chaque réponse rédigée (src/redacteur/redacteur.ts). Ce sont les
+ * deux seuls appels de rôle en production.
+ */
 const ROLES: { cle: string; titre: string; detail: string }[] = [
   { cle: "classify", titre: "Classer", detail: "Repère le risque dans les messages reçus." },
   { cle: "compose", titre: "Rédiger", detail: "Écrit les réponses qui te sont soumises." },
-  { cle: "profile", titre: "Profiler", detail: "Déduit des réglages depuis l'historique." },
-  { cle: "summarize", titre: "Résumer", detail: "Condense les longues conversations." },
+];
+
+/**
+ * Les rôles que la couche IA sait tenir mais que rien n'appelle encore.
+ *
+ * Ils restent dans `RoleIA` et dans le catalogue de modèles — le jour où le
+ * résumé glissant et la proposition de réglages sont écrits, ils reviennent
+ * ici d'une ligne. Les afficher en attendant donnait un réglage qui ne
+ * changeait rien : le pire genre de bouton.
+ */
+const ROLES_DORMANTS: { cle: string; titre: string }[] = [
+  { cle: "profile", titre: "Profiler" },
+  { cle: "summarize", titre: "Résumer" },
 ];
 
 const MESSAGE_RESEAU = "Connexion réseau impossible. Réessaie dans un instant.";
@@ -78,12 +110,27 @@ function ChoixModele({
 }) {
   const connus = kind ? modelesPour(kind) : [];
   const recommande = kind ? modeleRecommande(kind, role as RoleModele) : null;
+  // Jev ne génère pas de texte. Lui proposer « Rédiger » donnerait un réglage
+  // d'apparence valide qui échouerait au premier message : autant le dire ici.
+  const refuseLeRole = kind !== undefined && !rolesSupportes(kind).includes(role as RoleModele);
   const dansLaListe = connus.some((modele) => modele.id === valeur);
   // « Autre » reste sélectionné tant qu'on y a mis quelque chose, pour ne pas
   // renvoyer l'utilisateur dans la liste à chaque frappe.
   const [libre, setLibre] = useState(valeur !== "" && !dansLaListe);
 
   const choisi = connus.find((modele) => modele.id === valeur);
+
+  if (refuseLeRole) {
+    return (
+      <label className="champ">
+        <span>Modèle</span>
+        <span className="champ__aide" role="alert">
+          Ce fournisseur ne sait pas tenir ce rôle : choisis-en un autre, sinon ce réglage sera
+          ignoré.
+        </span>
+      </label>
+    );
+  }
 
   if (connus.length === 0 || libre) {
     return (
@@ -294,6 +341,18 @@ export default function Fournisseurs() {
     setReglages({ ...reglages, roles: { ...reglages.roles, [role]: entrees } });
   };
 
+  // Un rôle retiré de la page garde ses affectations en base : les cacher sans
+  // le dire laisserait un réglage invisible, impossible à retrouver comme à
+  // effacer. On les montre en une ligne, avec de quoi s'en débarrasser.
+  const dormantsConfigures = ROLES_DORMANTS.filter(
+    (role) => (reglages.roles[role.cle] ?? []).length > 0,
+  );
+  const oublierRolesDormants = () => {
+    const roles = { ...reglages.roles };
+    for (const role of ROLES_DORMANTS) delete roles[role.cle];
+    setReglages({ ...reglages, roles });
+  };
+
   return (
     <main className="ecran">
       <div className="colonne">
@@ -494,6 +553,17 @@ export default function Fournisseurs() {
               </button>
             </div>
           ))}
+          {dormantsConfigures.length > 0 && (
+            <p className="section__aide">
+              {dormantsConfigures.map((role) => role.titre).join(" et ")}{" "}
+              {dormantsConfigures.length > 1 ? "ont" : "a"} encore un fournisseur affecté en base,
+              mais rien ne les appelle pour l&apos;instant.{" "}
+              <button type="button" className="lien-inline" onClick={oublierRolesDormants}>
+                Oublier ces affectations
+              </button>{" "}
+              puis enregistre.
+            </p>
+          )}
           <button
             type="button"
             className="bouton-principal"

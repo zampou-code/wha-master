@@ -73,13 +73,65 @@ describe("planification d'un envoi", () => {
     ).toBe(true);
   });
 
-  it("tire un délai entre les bornes réglées", () => {
-    const court = planifier({ maintenant: aAbidjan(12), reglages: base, alea: () => 0 });
-    const long = planifier({ maintenant: aAbidjan(12), reglages: base, alea: () => 1 });
+  it("part du milieu des bornes quand aucune médiane n'est mesurée", () => {
     const milieu = planifier({ maintenant: aAbidjan(12), reglages: base, alea: () => 0.5 });
-    expect(court.envoyable && court.delaiMs).toBe(45_000);
-    expect(long.envoyable && long.delaiMs).toBe(600_000);
     expect(milieu.envoyable && milieu.delaiMs).toBe(322_500);
+  });
+
+  it("imite le délai de réponse mesuré plutôt que de tirer au hasard", () => {
+    // La conception le demandait depuis le début : le délai est fonction du
+    // temps de réponse médian. Tirer un uniforme entre les bornes donnait la
+    // même moyenne pour tout le monde — cinq minutes pour répondre « ok » à
+    // quelqu'un qu'on lit d'habitude dans la minute.
+    const mesure = planifier({
+      maintenant: aAbidjan(12),
+      reglages: { ...base, medianeReponseSec: 90 },
+      alea: () => 0.5,
+    });
+    expect(mesure.envoyable && mesure.delaiMs).toBe(90_000);
+  });
+
+  it("ajoute un temps d'écriture proportionnel à la longueur", () => {
+    // Un long message ne peut pas arriver aussi vite qu'un « ok ».
+    const reglages = { ...base, medianeReponseSec: 60 };
+    const bref = planifier({
+      maintenant: aAbidjan(12), reglages, alea: () => 0.5, longueurMessage: 6,
+    });
+    const pave = planifier({
+      maintenant: aAbidjan(12), reglages, alea: () => 0.5, longueurMessage: 300,
+    });
+
+    expect(bref.envoyable && bref.delaiMs).toBe(61_000);
+    expect(pave.envoyable && pave.delaiMs).toBe(110_000);
+  });
+
+  it("fait varier le délai pour qu'il ne devienne pas une signature", () => {
+    // Deux messages de même longueur partant au même délai à la seconde près
+    // se repèrent.
+    const reglages = { ...base, medianeReponseSec: 200 };
+    const bas = planifier({ maintenant: aAbidjan(12), reglages, alea: () => 0 });
+    const haut = planifier({ maintenant: aAbidjan(12), reglages, alea: () => 1 });
+
+    expect(bas.envoyable && bas.delaiMs).toBe(130_000);
+    expect(haut.envoyable && haut.delaiMs).toBe(270_000);
+  });
+
+  it("reste dans les bornes réglées, mesure ou pas", () => {
+    // Les bornes sont un réglage de l'utilisateur : une médiane mesurée hors
+    // bornes ne doit pas les contourner.
+    const tropLent = planifier({
+      maintenant: aAbidjan(12),
+      reglages: { ...base, medianeReponseSec: 86_400 },
+      alea: () => 1,
+    });
+    const tropVite = planifier({
+      maintenant: aAbidjan(12),
+      reglages: { ...base, medianeReponseSec: 2 },
+      alea: () => 0,
+    });
+
+    expect(tropLent.envoyable && tropLent.delaiMs).toBe(600_000);
+    expect(tropVite.envoyable && tropVite.delaiMs).toBe(45_000);
   });
 
   it("ne produit jamais de délai négatif ni inversé", () => {

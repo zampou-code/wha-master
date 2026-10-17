@@ -5,12 +5,16 @@ import { prisma } from "@/lib/prisma";
 export const DUREE_ESCALADE_MS = 6 * 60 * 60 * 1000;
 
 export async function creerEscalade(params: {
-  decisionId: string;
+  contactId: string;
+  // Absente pour une relance : une proposition d'initiative ne répond à aucun
+  // message reçu, donc à aucune décision.
+  decisionId?: string;
   proposition: string | null;
   expiresAt?: Date;
 }): Promise<{ id: string }> {
   const escalade = await prisma.escalation.create({
     data: {
+      contactId: params.contactId,
       decisionId: params.decisionId,
       proposedText: params.proposition,
       expiresAt: params.expiresAt ?? new Date(Date.now() + DUREE_ESCALADE_MS),

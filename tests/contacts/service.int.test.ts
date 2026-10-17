@@ -149,7 +149,8 @@ describe("service des contacts", () => {
       data: { messageId: message.id, contactId: actif.id, risks: [], ruleFired: "r", outcome: "ESCALATED" },
     });
     await prisma.escalation.create({
-      data: { decisionId: decision.id, expiresAt: new Date(Date.now() + 3_600_000) },
+      data: { contactId: decision.contactId,
+      decisionId: decision.id, expiresAt: new Date(Date.now() + 3_600_000) },
     });
 
     const liste = await listerContacts();

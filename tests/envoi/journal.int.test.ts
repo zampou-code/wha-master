@@ -94,7 +94,7 @@ describe("journal des envois", () => {
     });
     await prisma.escalation.create({
       data: {
-        decisionId: decision.id, proposedText: "Vendredi ça me va",
+        contactId: decision.contactId, decisionId: decision.id, proposedText: "Vendredi ça me va",
         controlMessageWaId: "WA-CTRL-1", expiresAt: new Date(Date.now() + 3_600_000),
       },
     });

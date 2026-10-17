@@ -18,7 +18,7 @@ async function escalade(expiresAt: Date, status: "OPEN" | "RESOLVED" = "OPEN") {
   const decision = await prisma.decision.create({
     data: { messageId: message.id, contactId: contact.id, risks: [], ruleFired: "r", outcome: "ESCALATED" },
   });
-  return prisma.escalation.create({ data: { decisionId: decision.id, status, expiresAt } });
+  return prisma.escalation.create({ data: { contactId: decision.contactId, decisionId: decision.id, status, expiresAt } });
 }
 
 // `getEnv()` met sa lecture en cache au niveau du module : chaque mutation de

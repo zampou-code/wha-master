@@ -38,7 +38,7 @@ async function escaladeDepuisReponse(replyToWaId: string | null) {
   if (replyToWaId === null) return null;
   const candidats = await prisma.escalation.findMany({
     where: { controlMessageWaId: replyToWaId },
-    include: { decision: { include: { contact: true } } },
+    include: { contact: true, decision: true },
   });
   if (candidats.length > 1) {
     // Deux escalades pour un même message de contrôle : la contrainte
@@ -239,7 +239,7 @@ export async function traiterMessageControle(params: {
     return { action: "deja-resolue", reponse: "Cette escalade est déjà résolue.", aboutie: false };
   }
 
-  const contact = escalade.decision.contact;
+  const contact = escalade.contact;
 
   if (commande.type === "envoyer" || commande.type === "texte") {
     // P1, troisième garde-fou, symétrique de ceux de /mode et de « 4 pause » :

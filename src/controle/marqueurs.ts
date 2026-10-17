@@ -9,12 +9,14 @@
 // échouer `estMessageSysteme`, et le système traiterait alors ses propres
 // escalades comme des commandes.
 export const MARQUEUR_ESCALADE = "⚠️";
+export const MARQUEUR_RELANCE = "💬";
 export const MARQUEUR_EXPIRATION = "⏳";
 export const MARQUEUR_FAIT = "✅";
 export const MARQUEUR_SANS_EFFET = "↩️";
 
 export const MARQUEURS = [
   MARQUEUR_ESCALADE,
+  MARQUEUR_RELANCE,
   MARQUEUR_EXPIRATION,
   MARQUEUR_FAIT,
   MARQUEUR_SANS_EFFET,

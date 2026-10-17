@@ -1,5 +1,5 @@
 import { RiskCategory } from "@/generated/prisma/client";
-import { MARQUEUR_ESCALADE } from "@/controle/marqueurs";
+import { MARQUEUR_ESCALADE, MARQUEUR_RELANCE } from "@/controle/marqueurs";
 
 const LIBELLES: Record<RiskCategory, string> = {
   ENGAGEMENT: "engagement",
@@ -60,5 +60,45 @@ export function formaterEscalade(params: {
     "",
     params.motifRefus ?? "Aucune proposition n'a pu être rédigée.",
     "2 <ton texte> · 3 ignorer · 4 pause",
+  ].join("\n");
+}
+
+/** Combien de temps la conversation est restée muette, en français lisible. */
+export function depuis(heures: number): string {
+  if (heures < 48) return `${Math.round(heures)} h`;
+  const jours = Math.round(heures / 24);
+  return jours < 14 ? `${jours} jours` : `${Math.round(jours / 7)} semaines`;
+}
+
+/**
+ * Une relance proposée dans le groupe de contrôle.
+ *
+ * Même grammaire de réponses qu'une escalade — « 1 » envoie, « 2 » remplace —
+ * parce qu'il n'y a aucune raison d'apprendre deux vocabulaires. Ce qui change
+ * est l'en-tête : il n'y a pas de message reçu à citer, mais une durée de
+ * silence qui explique pourquoi la question arrive maintenant.
+ */
+export function formaterRelance(params: {
+  alias: string;
+  silenceHeures: number;
+  proposition: string | null;
+  motifRefus: string | null;
+}): string {
+  const entete = `${MARQUEUR_RELANCE} ${params.alias} — silence depuis ${depuis(params.silenceHeures)}`;
+
+  if (params.proposition !== null) {
+    return [
+      entete,
+      "",
+      `Relance proposée : « ${params.proposition} »`,
+      "1 envoyer · 2 <ton texte> · 3 laisser tomber · 4 pause",
+    ].join("\n");
+  }
+
+  return [
+    entete,
+    "",
+    params.motifRefus ?? "Je n'ai pas de relance à proposer.",
+    "2 <ton texte> · 3 laisser tomber · 4 pause",
   ].join("\n");
 }

@@ -99,8 +99,9 @@ model Contact {
   policy  ContactPolicy?
   thread  Thread?
   profile ContactProfile?
-  decisions Decision[]
-  envois    EnvoiPlanifie[]
+  decisions  Decision[]
+  envois     EnvoiPlanifie[]
+  escalades  Escalation[]
 }
 
 model ContactPolicy {
@@ -145,6 +146,10 @@ model Thread {
   medianReplyDelaySec     Int?
   autoStreak              Int      @default(0)
   lastMessageAt           DateTime?
+  // Dernière relance proposée ou envoyée. Comparée au dernier message reçu,
+  // elle dit si on a déjà tenté de réveiller cette conversation — sans quoi le
+  // travail de fond relancerait à chaque passage.
+  lastInitiativeAt        DateTime?
 
   messages Message[]
 }
@@ -220,9 +225,16 @@ model Decision {
 }
 
 model Escalation {
-  id                  String           @id @default(cuid())
-  decisionId          String           @unique
-  decision            Decision         @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+
+  // Nullable depuis la relance : une escalade peut porter sur une proposition
+  // d'initiative, qui ne répond à aucun message reçu et n'a donc pas de
+  // Decision. `contactId` est porté directement plutôt que déduit de la
+  // décision — c'est la seule information dont toutes les lectures ont besoin.
+  decisionId String?   @unique
+  decision   Decision? @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
   status              EscalationStatus @default(OPEN)
   controlMessageWaId  String?          @unique
   proposedText        String?
@@ -233,6 +245,7 @@ model Escalation {
   createdAt           DateTime         @default(now())
 
   @@index([status, expiresAt])
+  @@index([contactId, status])
 }
 
 model ProviderConfig {

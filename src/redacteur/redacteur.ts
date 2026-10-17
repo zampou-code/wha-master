@@ -53,17 +53,27 @@ Règles absolues :
 - "factsUsed" liste les identifiants entre crochets des faits que tu as réellement utilisés.`;
 }
 
-function construireInvite(contexte: ContexteRedaction, tourDeParole: string): string {
+function construireInvite(
+  contexte: ContexteRedaction,
+  tourDeParole: string,
+  etiquetteTour: string,
+): string {
   const historique = contexte.derniersMessages
     .map((m) => `${m.direction === "IN" ? "Elle/il" : "Toi"} : ${m.texte}`)
     .join("\n");
   const resume = contexte.resumeFil ? `Résumé du fil : ${contexte.resumeFil}\n\n` : "";
-  return `${resume}${historique}\n\nMessage auquel répondre :\n${tourDeParole}`;
+  return `${resume}${historique}\n\n${etiquetteTour} :\n${tourDeParole}`;
 }
 
 export async function rediger(params: {
   contexte: ContexteRedaction;
   tourDeParole: string;
+  /**
+   * Ce que `tourDeParole` représente. Par défaut le message reçu ; une relance
+   * y met « Situation », parce qu'elle ne répond à aucun message et qu'un
+   * modèle à qui on présente une consigne comme un message reçu y répond.
+   */
+  etiquetteTour?: string;
   contactId?: string;
   appeler?: typeof appelerStructure;
 }): Promise<ResultatRedaction> {
@@ -76,7 +86,11 @@ export async function rediger(params: {
       contactId: params.contactId,
       schema: sortieSchema,
       systeme: construireSysteme(params.contexte),
-      invite: construireInvite(params.contexte, params.tourDeParole),
+      invite: construireInvite(
+        params.contexte,
+        params.tourDeParole,
+        params.etiquetteTour ?? "Message auquel répondre",
+      ),
     });
   } catch (erreur) {
     // P2 : un rédacteur indisponible ne produit pas de message, il produit une

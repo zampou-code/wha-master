@@ -40,6 +40,7 @@ export async function publierEscalade(params: {
   // entre la décision et le groupe, et plus rien ne le rattrapait — ni
   // l'expiration, ni le garde-fou « escalade ouverte » du message suivant.
   const { id: escaladeId } = await creerEscalade({
+    contactId: params.contactId,
     decisionId: params.decisionId,
     proposition: null,
   });

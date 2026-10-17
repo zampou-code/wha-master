@@ -31,11 +31,6 @@ function reglages(roles: Record<string, { providerId: string; model: string }[]>
   };
 }
 
-/** Le corps JSON du dernier appel PUT, tel qu'il partirait vers l'API. */
-function dernierPut(): { roles?: Record<string, unknown> } {
-  const puts = fetchMock.mock.calls.filter((appel) => (appel[1] as RequestInit)?.method === "PUT");
-  return JSON.parse(String((puts.at(-1)![1] as RequestInit).body));
-}
 
 async function monter() {
   const { default: Fournisseurs } = await import("@/app/fournisseurs/page");
@@ -55,67 +50,16 @@ describe("page fournisseurs — rôles affichés", () => {
     vi.unstubAllGlobals();
   });
 
-  it("n'offre que les rôles que le moteur appelle vraiment", async () => {
-    // « Profiler » et « Résumer » étaient réglables alors que rien ne les
-    // appelle : le réglage se faisait, s'enregistrait, et ne changeait rien.
+  it("offre les quatre rôles, qui sont tous appelés", async () => {
+    // « Profiler » et « Résumer » ont été absents de cette page le temps qu'ils
+    // ne servent à rien : un réglage sans effet est pire qu'un réglage absent.
+    // Ils sont revenus avec le code qui les appelle.
     fetchMock.mockResolvedValue(reponseJson(reglages({ classify: [], compose: [] })));
     await monter();
 
-    expect(screen.getByText("Classer")).toBeTruthy();
-    expect(screen.getByText("Rédiger")).toBeTruthy();
-    expect(screen.queryByText("Profiler")).toBeNull();
-    expect(screen.queryByText("Résumer")).toBeNull();
-  });
-
-  it("garde en base les affectations des rôles retirés", async () => {
-    // La page envoie la carte entière des rôles : cacher un rôle sans y penser
-    // aurait effacé son affectation au premier enregistrement.
-    fetchMock.mockResolvedValue(
-      reponseJson(
-        reglages({
-          classify: [{ providerId: "p2", model: "jev-latest" }],
-          summarize: [{ providerId: "p1", model: "kimi-k2.6" }],
-        }),
-      ),
-    );
-    await monter();
-
-    await userEvent.click(screen.getByRole("button", { name: "Enregistrer les affectations" }));
-
-    expect(dernierPut().roles).toEqual({
-      classify: [{ providerId: "p2", model: "jev-latest" }],
-      summarize: [{ providerId: "p1", model: "kimi-k2.6" }],
-    });
-  });
-
-  it("signale une affectation dormante et sait l'oublier", async () => {
-    // Un réglage caché et impossible à effacer serait pire que l'afficher.
-    fetchMock.mockResolvedValue(
-      reponseJson(
-        reglages({
-          classify: [{ providerId: "p2", model: "jev-latest" }],
-          profile: [{ providerId: "p1", model: "kimi-k3" }],
-        }),
-      ),
-    );
-    await monter();
-
-    expect(screen.getByText(/Profiler/)).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: /Oublier ces affectations/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Enregistrer les affectations" }));
-
-    expect(dernierPut().roles).toEqual({
-      classify: [{ providerId: "p2", model: "jev-latest" }],
-    });
-  });
-
-  it("ne dit rien quand aucun rôle dormant n'est affecté", async () => {
-    fetchMock.mockResolvedValue(
-      reponseJson(reglages({ classify: [{ providerId: "p2", model: "jev-latest" }] })),
-    );
-    await monter();
-
-    expect(screen.queryByText(/Oublier ces affectations/)).toBeNull();
+    for (const titre of ["Classer", "Rédiger", "Résumer", "Profiler"]) {
+      expect(screen.getByText(titre), titre).toBeTruthy();
+    }
   });
 });
 
@@ -134,7 +78,7 @@ describe("page fournisseurs — Jev", () => {
   it("propose Jev dans les types de fournisseur", async () => {
     // Le classifieur sait l'appeler depuis le 2026-10-16, mais le formulaire ne
     // permettait pas de l'ajouter : la fonction était inaccessible.
-    fetchMock.mockResolvedValue(reponseJson(reglages({ classify: [], compose: [] })));
+    fetchMock.mockResolvedValue(reponseJson(reglages({ classify: [], compose: [], summarize: [] })));
     await monter();
 
     expect(screen.getByRole("option", { name: /Jev \(TypeSafe\)/ })).toBeTruthy();

@@ -76,6 +76,13 @@ export async function resoudreRoute(
 ): Promise<EntreeRoute[]> {
   let routeId: string | null = null;
 
+  // `providerRouteId` reste vide en pratique : il n'existe qu'une route, la
+  // route par défaut, et rien dans l'interface ne permet d'en créer d'autres.
+  // Le chemin est gardé parce qu'il ne ment à personne — aucun réglage ne
+  // prétend l'inverse — et qu'il retombe proprement sur la route par défaut.
+  // Le jour où plusieurs routes auront un sens (un fournisseur dédié à un
+  // contact), c'est ici que ça se branche, et il faudra d'abord une gestion
+  // des routes dans la page des fournisseurs.
   if (options.contactId) {
     const politique = await prisma.contactPolicy.findUnique({
       where: { contactId: options.contactId },

@@ -22,6 +22,7 @@ async function escaladeOuverte(proposition: string | null = "Vendredi ça me va"
   });
   const escalade = await prisma.escalation.create({
     data: {
+      contactId: decision.contactId,
       decisionId: decision.id, proposedText: proposition,
       controlMessageWaId: "WA-CTRL-1", expiresAt: new Date(Date.now() + 3_600_000),
     },
@@ -183,6 +184,7 @@ describe("routeur du groupe de contrôle", () => {
     try {
       escalade2 = await prisma.escalation.create({
         data: {
+          contactId: decision2.contactId,
           decisionId: decision2.id, proposedText: "Demain plutôt",
           controlMessageWaId: "WA-CTRL-1", expiresAt: new Date(Date.now() + 3_600_000),
         },

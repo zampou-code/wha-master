@@ -47,8 +47,9 @@ describe("file d'envoi", () => {
     const envoi = await planifierEnvoi({
       contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0.5,
     });
-    // 45 s + 0,5 × (600 − 45) = 322,5 s
-    expect(envoi?.aEnvoyerApres.getTime()).toBe(midi.getTime() + 322_500);
+    // Milieu des bornes faute de médiane mesurée (322,5 s), plus une seconde
+    // d'écriture pour « coucou » (6 caractères), sans variation : 323,5 s.
+    expect(envoi?.aEnvoyerApres.getTime()).toBe(midi.getTime() + 323_500);
   });
 
   it("repousse à la reprise au lieu d'abandonner pendant les heures de silence", async () => {
@@ -74,7 +75,7 @@ describe("file d'envoi", () => {
     const c = await contact();
     await planifierEnvoi({ contactId: c.id, texte: "Rien de spécial", maintenant: midi, alea: () => 0 });
     const { envoyer, presence } = simulacres();
-    const apres = new Date(midi.getTime() + 60_000);
+    const apres = new Date(midi.getTime() + 601_000);
 
     const bilan = await traiterEnvoisDus({ maintenant: apres, envoyer, presence });
 
@@ -98,7 +99,7 @@ describe("file d'envoi", () => {
     await prisma.contact.update({ where: { id: c.id }, data: { mode: ContactMode.OFF } });
 
     const { envoyer, presence } = simulacres();
-    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
 
     expect(envoyer).not.toHaveBeenCalled();
     expect(bilan.annules).toBe(1);
@@ -112,7 +113,7 @@ describe("file d'envoi", () => {
     await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
     await prisma.contact.update({ where: { id: c.id }, data: { mode: ContactMode.DRAFT } });
     const { envoyer, presence } = simulacres();
-    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
     expect(envoyer).not.toHaveBeenCalled();
   });
 
@@ -123,7 +124,7 @@ describe("file d'envoi", () => {
     await prisma.systemState.create({ data: { id: "singleton", globalPaused: true } });
 
     const { envoyer, presence } = simulacres();
-    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
 
     expect(envoyer).not.toHaveBeenCalled();
     expect(bilan.reportes).toBe(1);
@@ -141,11 +142,11 @@ describe("file d'envoi", () => {
       data: { messageId: message.id, contactId: c.id, risks: [], ruleFired: "r", outcome: "ESCALATED" },
     });
     await prisma.escalation.create({
-      data: { decisionId: decision.id, expiresAt: new Date(midi.getTime() + 3_600_000) },
+      data: { contactId: decision.contactId, decisionId: decision.id, expiresAt: new Date(midi.getTime() + 3_600_000) },
     });
 
     const { envoyer, presence } = simulacres();
-    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
     expect(envoyer).not.toHaveBeenCalled();
     expect(bilan.annules).toBe(1);
   });
@@ -156,7 +157,7 @@ describe("file d'envoi", () => {
     await planifierEnvoi({ contactId: c.id, texte: "encore moi", maintenant: midi, alea: () => 0 });
 
     const { envoyer, presence } = simulacres();
-    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    const bilan = await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
     expect(envoyer).not.toHaveBeenCalled();
     expect(bilan.annules).toBe(1);
   });
@@ -165,7 +166,7 @@ describe("file d'envoi", () => {
     const c = await contact();
     await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
     const { envoyer, presence } = simulacres();
-    const apres = new Date(midi.getTime() + 60_000);
+    const apres = new Date(midi.getTime() + 601_000);
 
     const [a, b] = await Promise.all([
       traiterEnvoisDus({ maintenant: apres, envoyer, presence }),
@@ -182,7 +183,7 @@ describe("file d'envoi", () => {
     const envoyer = vi.fn().mockRejectedValue(new Error("GOWA injoignable"));
     const presence = vi.fn().mockResolvedValue(undefined);
 
-    let quand = new Date(midi.getTime() + 60_000);
+    let quand = new Date(midi.getTime() + 601_000);
     for (let i = 0; i < 3; i++) {
       await traiterEnvoisDus({ maintenant: quand, envoyer, presence });
       quand = new Date(quand.getTime() + 10 * 60_000);
@@ -202,7 +203,7 @@ describe("file d'envoi", () => {
     await planifierEnvoi({ contactId: c.id, texte: "b", maintenant: midi, alea: () => 0 });
     expect(await annulerEnvoisEnAttente(c.id, "désactivé depuis l'interface")).toBe(2);
     const { envoyer, presence } = simulacres();
-    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
     expect(envoyer).not.toHaveBeenCalled();
   });
 
@@ -212,7 +213,7 @@ describe("file d'envoi", () => {
     // n'attend rien.
     const c = await contact();
     await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
-    const apres = new Date(midi.getTime() + 60_000);
+    const apres = new Date(midi.getTime() + 601_000);
 
     // L'envoi réussit et la consignation lève : c'est exactement l'état
     // « parti chez le contact, perdu côté base ».
@@ -238,7 +239,7 @@ describe("file d'envoi", () => {
     // dernier examen et la prise de possession, l'état change.
     const c = await contact();
     await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
-    const apres = new Date(midi.getTime() + 60_000);
+    const apres = new Date(midi.getTime() + 601_000);
 
     const envoyer = vi.fn().mockResolvedValue({ messageId: "WA-OUT-1" });
     const presence = vi.fn().mockResolvedValue(undefined);
@@ -313,7 +314,7 @@ describe("file d'envoi", () => {
     await planifierEnvoi({ contactId: c.id, texte: "coucou", maintenant: midi, alea: () => 0 });
     await preparer(c.id);
     const { envoyer, presence } = simulacres();
-    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
     expect(envoyer.mock.calls.length > 0 ? "ENVOYE" : "BLOQUE").toBe(attendu);
   });
 
@@ -326,7 +327,7 @@ describe("file d'envoi", () => {
     });
     await planifierEnvoi({ contactId: sansRien.id, texte: "coucou", maintenant: midi, alea: () => 0 });
     const { envoyer, presence } = simulacres();
-    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 60_000), envoyer, presence });
+    await traiterEnvoisDus({ maintenant: new Date(midi.getTime() + 601_000), envoyer, presence });
     expect(envoyer).toHaveBeenCalledTimes(1);
   });
 });
@@ -343,6 +344,6 @@ async function escaladeSur(contactId: string, statut: "OPEN" | "RESOLVED") {
     data: { messageId: message.id, contactId, risks: [], ruleFired: "r", outcome: "ESCALATED" },
   });
   await prisma.escalation.create({
-    data: { decisionId: decision.id, status: statut, expiresAt: new Date(Date.now() + 3_600_000) },
+    data: { contactId: decision.contactId, decisionId: decision.id, status: statut, expiresAt: new Date(Date.now() + 3_600_000) },
   });
 }

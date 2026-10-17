@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import ImportHistorique from "./import";
+import ProfilDeduit, { type Profil, type Proposition } from "./profil";
 
 type Mode = "OFF" | "DRAFT" | "AUTO";
 type Politique = {
@@ -60,6 +62,7 @@ export default function FicheContact() {
   const [alias, setAlias] = useState("");
   const [isAdult, setIsAdult] = useState(false);
   const [politique, setPolitique] = useState<Politique | null>(null);
+  const [profil, setProfil] = useState<Profil | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [succes, setSucces] = useState<string | null>(null);
   const [chargement, setChargement] = useState(true);
@@ -92,7 +95,9 @@ export default function FicheContact() {
       setChargement(false);
       return;
     }
-    appliquer(((await reponse.json()) as { contact: Contact }).contact);
+    const recu = (await reponse.json()) as { contact: Contact; profil?: Profil | null };
+    appliquer(recu.contact);
+    setProfil(recu.profil ?? null);
     setChargement(false);
   }, [params.id, router, appliquer]);
 
@@ -286,6 +291,30 @@ export default function FicheContact() {
         </section>
 
         <section className="section">
+          <h2>Relancer la conversation</h2>
+          <p className="section__aide">
+            Quand la conversation s&apos;éteint et que c&apos;est toi qui as écrit en dernier,
+            l&apos;assistant peut proposer un message pour la reprendre. Une seule fois par
+            silence, et jamais pendant les heures de silence.
+          </p>
+          <label className="champ">
+            <span>Initiative</span>
+            <select
+              value={politique.styleInitiative}
+              onChange={(e) => majPolitique({ styleInitiative: e.target.value })}
+            >
+              <option value="jamais">Jamais — n&apos;écrit que des réponses</option>
+              <option value="rare">Rare — après trois jours de silence</option>
+              <option value="souvent">Souvent — après un jour de silence</option>
+            </select>
+            <span className="champ__aide">
+              En mode brouillon, la relance t&apos;est proposée dans le groupe de contrôle. En
+              automatique, elle part comme une réponse.
+            </span>
+          </label>
+        </section>
+
+        <section className="section">
           <h2>Heures de silence</h2>
           <p className="section__aide">
             Aucune réponse ne part entre ces deux heures. Laisse vide pour ne jamais les appliquer.
@@ -313,6 +342,26 @@ export default function FicheContact() {
             </label>
           </div>
         </section>
+
+        <ImportHistorique contactId={contact.id} surImport={() => void charger()} />
+
+        <ProfilDeduit
+          contactId={contact.id}
+          profil={profil}
+          surAnalyse={setProfil}
+          surApplication={(propositions: Record<string, Proposition>) => {
+            // Reporté dans le formulaire, pas enregistré : la bannière
+            // « modifications non enregistrées » prend le relais, et c'est le
+            // même geste que pour n'importe quel autre réglage.
+            const applicables: Partial<Politique> = {};
+            for (const [cle, proposition] of Object.entries(propositions)) {
+              if (cle in politique) {
+                (applicables as Record<string, string | number>)[cle] = proposition.valeur;
+              }
+            }
+            majPolitique(applicables);
+          }}
+        />
 
         <button
           type="button"

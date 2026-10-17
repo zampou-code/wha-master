@@ -30,3 +30,8 @@ export function estJidDePersonne(jid: string): boolean {
 export function filtrePersonnes() {
   return { NOT: { OR: SUFFIXES_NON_PERSONNE.map((suffixe) => ({ jid: { endsWith: suffixe } })) } };
 }
+
+/** Son complément : ce que le harness n'a jamais eu à suivre. */
+export function filtreNonPersonnes() {
+  return { OR: SUFFIXES_NON_PERSONNE.map((suffixe) => ({ jid: { endsWith: suffixe } })) };
+}

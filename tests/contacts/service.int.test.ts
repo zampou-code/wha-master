@@ -26,6 +26,32 @@ async function contact(surcharge: { jid?: string; mode?: ContactMode; isAdult?: 
 describe("service des contacts", () => {
   beforeEach(resetDb);
 
+  it("ne liste que des personnes : ni groupe, ni statut, ni chaîne", async () => {
+    // L'ingestion créait un contact pour chaque conversation reçue, groupes
+    // compris : la liste se remplissait de lignes sans nom qu'on ne pouvait ni
+    // nommer, ni régler, ni faire disparaître.
+    await contact({ jid: "22500000001@s.whatsapp.net" });
+    await contact({ jid: "185276188841234@lid" });
+    await contact({ jid: "120363401234567890@g.us" });
+    await contact({ jid: "status@broadcast" });
+    await contact({ jid: "120363987654321098@newsletter" });
+
+    const liste = await listerContacts();
+
+    expect(liste.map((c) => c.jid).sort()).toEqual([
+      "185276188841234@lid",
+      "22500000001@s.whatsapp.net",
+    ]);
+  });
+
+  it("garde dans la liste un contact dont le suffixe est inconnu", async () => {
+    // Masquer un vrai contact serait pire que montrer un groupe : on ne le
+    // chercherait pas, on croirait simplement qu'il n'a jamais écrit.
+    await contact({ jid: "22500000002@forme.future" });
+
+    expect((await listerContacts()).map((c) => c.jid)).toEqual(["22500000002@forme.future"]);
+  });
+
   it("crée la politique manquante plutôt que de rendre une fiche vide", async () => {
     const sansPolitique = await prisma.contact.create({
       data: { jid: "225999@s.whatsapp.net", thread: { create: {} } },

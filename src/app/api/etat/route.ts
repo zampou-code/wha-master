@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ContactMode, StatutEnvoi } from "@/generated/prisma/client";
 import { requireSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { filtrePersonnes } from "@/contacts/jid";
 import { log } from "@/lib/log";
 import { lireGroupeDeControle } from "@/controle/groupe";
 import { resoudreRoute } from "@/ia/registre";
@@ -48,8 +49,10 @@ export async function GET(request: Request) {
         prisma.personaFact.count({ where: { shareable: true } }),
         resoudreRoute("compose"),
         resoudreRoute("classify"),
-        prisma.contact.count({ where: { mode: { not: ContactMode.OFF } } }),
-        prisma.contact.count(),
+        // Le même filtre que la liste : annoncer « 47 contacts » quand la page
+        // n'en montre que douze n'apprenait rien, sinon à douter du reste.
+        prisma.contact.count({ where: { ...filtrePersonnes(), mode: { not: ContactMode.OFF } } }),
+        prisma.contact.count({ where: filtrePersonnes() }),
         prisma.escalation.count({ where: { status: "OPEN" } }),
         prisma.systemState.findUnique({ where: { id: "singleton" }, select: { globalPaused: true } }),
         prisma.envoiPlanifie.count({ where: { statut: StatutEnvoi.EN_ATTENTE } }),

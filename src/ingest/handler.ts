@@ -12,6 +12,7 @@ import {
   MARQUEUR_SANS_EFFET,
 } from "@/controle/marqueurs";
 import { createGowaClient } from "@/gowa/client";
+import { estJidDePersonne } from "@/contacts/jid";
 
 type EnvoyeurControle = (jid: string, texte: string) => Promise<{ messageId?: string }>;
 
@@ -25,7 +26,7 @@ async function envoyerAuGroupeDeControle(jid: string, texte: string): Promise<{ 
 // action, et l'utilisateur recevait un ✅ pour une commande sans effet.
 
 export type IngestResult = {
-  statut: "persiste" | "doublon" | "groupe_de_controle" | "ignore";
+  statut: "persiste" | "doublon" | "groupe_de_controle" | "hors_personne" | "ignore";
   messageId?: string;
 };
 
@@ -118,6 +119,16 @@ export async function ingererMessage(
       }
     }
     return { statut: "groupe_de_controle" };
+  }
+
+  // Ce qui n'est pas une personne n'est pas une conversation que le harness
+  // entretient. Avant ce filtre, chaque groupe WhatsApp devenait un « contact »
+  // dans la liste, et chacun de ses messages était classé — un appel de modèle
+  // par message de groupe, payé pour rien. Le groupe de contrôle, lui, est
+  // traité plus haut et ne passe jamais ici.
+  if (!estJidDePersonne(payload.chat_id)) {
+    log.debug("Message hors conversation personnelle, ignoré", { chatId: payload.chat_id });
+    return { statut: "hors_personne" };
   }
 
   const existant = await prisma.message.findUnique({

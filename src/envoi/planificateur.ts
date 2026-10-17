@@ -4,6 +4,11 @@ export type ReglagesEnvoi = {
   quietHoursEnd: number | null;
   minDelaySec: number;
   maxDelaySec: number;
+  /**
+   * Délai de réponse médian mesuré sur l'historique (`Thread.medianReplyDelaySec`,
+   * écrit par le profilage). Absent tant que le contact n'a pas été analysé.
+   */
+  medianeReponseSec?: number | null;
 };
 
 export type Planification =
@@ -53,9 +58,21 @@ function prochaineFinDuSilence(maintenant: Date, timezone: string, fin: number):
   return reprise;
 }
 
+// Six caractères par seconde : la vitesse d'un pouce sur un téléphone, relue
+// comme « cent mots par minute » dans les deux sens. Ce n'est pas une mesure,
+// c'est un ordre de grandeur assumé — l'exactitude n'a pas d'intérêt ici, la
+// proportionnalité si.
+const CARACTERES_PAR_SECONDE = 6;
+
+// ±35 % autour du délai calculé. Sans variation, deux messages de même longueur
+// partiraient au même délai à la seconde près : c'est une signature.
+const AMPLITUDE_ALEA = 0.35;
+
 export function planifier(params: {
   maintenant: Date;
   reglages: ReglagesEnvoi;
+  /** Longueur du message à envoyer, en caractères. */
+  longueurMessage?: number;
   // Injectable pour les tests : le délai est volontairement aléatoire, sinon
   // les envois tomberaient tous au même intervalle et se repéreraient.
   alea?: () => number;
@@ -81,6 +98,24 @@ export function planifier(params: {
   const alea = params.alea ?? Math.random;
   const minimum = Math.max(0, reglages.minDelaySec);
   const maximum = Math.max(minimum, reglages.maxDelaySec);
-  const secondes = minimum + alea() * (maximum - minimum);
+
+  // Le délai imite l'utilisateur au lieu d'être tiré au hasard dans ses bornes.
+  // La conception le demandait depuis le début — « f(temps de réponse médian,
+  // longueur du message, heure) » — et le code tirait un uniforme entre min et
+  // max, ce qui donnait une moyenne identique pour tout le monde : cinq minutes
+  // pour répondre « ok » à quelqu'un qu'on lit d'habitude dans la minute.
+  //
+  // Trois termes, dans cet ordre :
+  //   1. la médiane mesurée, ou le milieu des bornes faute de mesure ;
+  //   2. le temps d'écriture, proportionnel à la longueur — un long message ne
+  //      peut pas arriver aussi vite qu'un « ok » ;
+  //   3. une variation aléatoire, sans laquelle le délai devient une signature.
+  const base =
+    reglages.medianeReponseSec !== null && reglages.medianeReponseSec !== undefined
+      ? reglages.medianeReponseSec
+      : (minimum + maximum) / 2;
+  const frappe = (params.longueurMessage ?? 0) / CARACTERES_PAR_SECONDE;
+  const variation = 1 + (alea() * 2 - 1) * AMPLITUDE_ALEA;
+  const secondes = Math.min(maximum, Math.max(minimum, (base + frappe) * variation));
   return { envoyable: true, delaiMs: Math.round(secondes * 1000) };
 }

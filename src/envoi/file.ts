@@ -103,7 +103,7 @@ export async function planifierEnvoi(params: {
 }): Promise<{ id: string; aEnvoyerApres: Date } | null> {
   const contact = await prisma.contact.findUnique({
     where: { id: params.contactId },
-    include: { policy: true },
+    include: { policy: true, thread: true },
   });
   if (!contact) return null;
 
@@ -111,12 +111,15 @@ export async function planifierEnvoi(params: {
   const plan = planifier({
     maintenant,
     alea: params.alea,
+    longueurMessage: params.texte.length,
     reglages: {
       timezone: contact.policy?.timezone ?? "Africa/Abidjan",
       quietHoursStart: contact.policy?.quietHoursStart ?? null,
       quietHoursEnd: contact.policy?.quietHoursEnd ?? null,
       minDelaySec: contact.policy?.minDelaySec ?? 45,
       maxDelaySec: contact.policy?.maxDelaySec ?? 600,
+      // Mesuré par le profilage, absent tant qu'il n'a pas tourné.
+      medianeReponseSec: contact.thread?.medianReplyDelaySec ?? null,
     },
   });
 

@@ -88,13 +88,6 @@ export async function relancer(params: {
   });
   if (!dernier) return refus("relance.fil-vide", "Aucun message dans ce fil.");
 
-  // Si le dernier message est entrant, ce n'est pas une relance qu'il faut mais
-  // une réponse : le pipeline normal la doit, ou une escalade l'attend. Relancer
-  // ici écrirait par-dessus une conversation en cours.
-  if (dernier.direction === "IN") {
-    return refus("relance.reponse-attendue", "Le dernier message est le sien : il attend une réponse.");
-  }
-
   const silenceHeures = (maintenant.getTime() - dernier.timestamp.getTime()) / 3_600_000;
   if (silenceHeures < seuilHeures) {
     return refus(
@@ -105,6 +98,12 @@ export async function relancer(params: {
 
   // Une escalade ouverte, c'est déjà une question posée à l'utilisateur sur ce
   // contact : en ajouter une seconde transformerait le groupe en file d'attente.
+  // C'est aussi le vrai test de « une réponse est encore attendue » — et le seul
+  // qui tienne. Refuser toute relance dès que le dernier message était entrant
+  // paraissait prudent et condamnait précisément le cas pour lequel la relance
+  // existe : une conversation morte faute de réponse, escalade expirée depuis
+  // des semaines. C'est l'état qu'avait la seule conversation active en
+  // production le jour de la mise en service.
   const escaladeOuverte = await prisma.escalation.count({
     where: { contactId: contact.id, status: "OPEN" },
   });
@@ -152,10 +151,20 @@ export async function relancer(params: {
     return refus(plan.regle, plan.motif);
   }
 
+  // La consigne dépend de qui a parlé en dernier, parce que les deux situations
+  // ne s'écrivent pas pareil : reprendre après son propre message est léger,
+  // reprendre après un message resté sans réponse demande de le reconnaître.
+  // Faire comme si rien ne s'était passé serait le plus maladroit des deux.
+  const heures = Math.round(silenceHeures);
   const consigne =
-    `(Aucun message depuis ${Math.round(silenceHeures)} heures. Écris un message qui relance ` +
-    `la conversation : court, léger, sans reproche et sans parler de ce silence comme d'un ` +
-    `problème. Ne pose pas de question sur un fait que tu ne connais pas.)`;
+    dernier.direction === "OUT"
+      ? `(Aucun message depuis ${heures} heures, et c'est toi qui as écrit en dernier. Écris un ` +
+        `message qui relance la conversation : court, léger, sans reproche et sans parler de ce ` +
+        `silence comme d'un problème. Ne pose pas de question sur un fait que tu ne connais pas.)`
+      : `(Son dernier message est resté sans réponse depuis ${heures} heures. Écris un message ` +
+        `qui reprend la conversation : reconnais brièvement le temps passé sans t'excuser ` +
+        `longuement ni te justifier, puis relance sur autre chose. Ne réponds pas comme si le ` +
+        `message venait d'arriver. Ne pose pas de question sur un fait que tu ne connais pas.)`;
 
   let brouillon: string | null = null;
   let motifRefus: string | null = null;
@@ -274,7 +283,13 @@ export async function relancerFilsEndormis(params: {
       maintenant,
       envoyer: params.envoyer,
     });
-    if (!resultat.relance) continue;
+    if (!resultat.relance) {
+      // Sans cette ligne, le bilan de la tâche de fond disait « 1 examiné,
+      // 0 proposé » sans jamais dire pourquoi, et il fallait interroger la base
+      // pour le savoir.
+      log.debug("Relance écartée", { contactId: candidat.id, regle: resultat.regle });
+      continue;
+    }
     if (resultat.mode === "proposee") proposees += 1;
     else planifiees += 1;
   }

@@ -172,11 +172,52 @@ describe("relance d'une conversation endormie", () => {
     expect(SILENCE_HEURES.souvent).toBe(24);
   });
 
-  it("ne relance pas quand c'est une réponse qu'on doit", async () => {
-    // Le dernier message est le sien : relancer écrirait par-dessus une
-    // conversation en cours, et doublerait la réponse que le pipeline doit déjà.
+  it("relance une conversation morte faute de réponse", async () => {
+    // Le cas qu'avait en production la seule conversation active : son dernier
+    // message resté sans réponse, l'escalade expirée, et vingt-quatre jours de
+    // silence. Refuser là — au prétexte qu'une réponse serait due — condamnait
+    // exactement ce que la relance existe pour rattraper. Personne ne « répond »
+    // à un message d'il y a trois semaines : on reprend la conversation.
+    await groupeDeControle();
+    const sarah = await contact({ mode: ContactMode.DRAFT });
+    await dernierMessage(sarah.thread!.id, Direction.IN, 24 * 24);
+    await prisma.escalation.create({
+      data: {
+        contactId: sarah.id,
+        status: "EXPIRED",
+        expiresAt: new Date(MAINTENANT.getTime() - 20 * 24 * 3_600_000),
+      },
+    });
+    const rediger = redacteurFactice();
+
+    const resultat = await relancer({
+      contactId: sarah.id,
+      maintenant: MAINTENANT,
+      envoyer: vi.fn(async (_jid: string, _texte: string) => ({ messageId: "WA-1" })),
+      rediger,
+    });
+
+    expect(resultat).toMatchObject({ relance: true, mode: "proposee" });
+    // La consigne dit la vérité de la situation : faire comme si le message
+    // venait d'arriver produirait une réponse à contretemps de trois semaines.
+    const params = (rediger as unknown as { mock: { calls: Record<string, string>[][] } }).mock
+      .calls[0][0];
+    expect(params.tourDeParole).toMatch(/resté sans réponse/);
+    expect(params.tourDeParole).toMatch(/ne réponds pas comme si le message venait d'arriver/i);
+  });
+
+  it("ne relance pas tant qu'une escalade attend ta réponse", async () => {
+    // C'est le vrai test de « une réponse est encore attendue » : la question
+    // est déjà posée dans le groupe, en poser une seconde serait du bruit.
     const sarah = await contact();
     await dernierMessage(sarah.thread!.id, Direction.IN, 500);
+    await prisma.escalation.create({
+      data: {
+        contactId: sarah.id,
+        status: "OPEN",
+        expiresAt: new Date(MAINTENANT.getTime() + 3_600_000),
+      },
+    });
 
     const resultat = await relancer({
       contactId: sarah.id,
@@ -184,7 +225,22 @@ describe("relance d'une conversation endormie", () => {
       rediger: redacteurFactice(),
     });
 
-    expect(resultat).toMatchObject({ relance: false, regle: "relance.reponse-attendue" });
+    expect(resultat).toMatchObject({ relance: false, regle: "relance.escalade-ouverte" });
+  });
+
+  it("laisse le pipeline répondre à un message qui vient d'arriver", async () => {
+    // Son message est récent : c'est une réponse qui est due, et le seuil de
+    // silence suffit à l'écarter sans règle supplémentaire.
+    const sarah = await contact({ initiative: "rare" });
+    await dernierMessage(sarah.thread!.id, Direction.IN, 2);
+
+    const resultat = await relancer({
+      contactId: sarah.id,
+      maintenant: MAINTENANT,
+      rediger: redacteurFactice(),
+    });
+
+    expect(resultat).toMatchObject({ relance: false, regle: "relance.trop-tot" });
   });
 
   it("ne relance qu'une fois par silence", async () => {
@@ -365,6 +421,7 @@ describe("relance d'une conversation endormie", () => {
     const params = (rediger as unknown as { mock: { calls: Record<string, string>[][] } }).mock.calls[0][0];
     expect(params.etiquetteTour).toBe("Situation");
     expect(params.tourDeParole).toMatch(/relance la conversation/);
+    expect(params.tourDeParole).toMatch(/c'est toi qui as écrit en dernier/);
   });
 
   it("ne parcourt que les fils réellement endormis", async () => {

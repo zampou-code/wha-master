@@ -27,5 +27,14 @@ RUN export \
   && pnpm prisma generate \
   && pnpm build
 
+# Le SHA du commit construit, pour que /api/health dise quelle version tourne.
+# GIT_SHA l'emporte s'il est passé au build ; sinon il est lu dans le peu de
+# .git que le .dockerignore laisse entrer. Jamais bloquant : sans source, la
+# route répond « inconnu » plutôt qu'une version inventée.
+ARG GIT_SHA=""
+# Le .git partiel ne sert qu'à cette commande : il sort de l'image une fois
+# le SHA figé, pour que `.commit-sha` en soit la seule source.
+RUN COMMIT_SHA="$GIT_SHA" pnpm tsx src/scripts/ecrire-version.ts && rm -rf .git
+
 EXPOSE 3000
 CMD ["sh", "-c", "pnpm prisma migrate deploy && pnpm tsx src/scripts/seed-admin.ts && pnpm start"]
